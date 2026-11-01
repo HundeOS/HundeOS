@@ -84,19 +84,6 @@ static Result(MamaBootDisk) MamaBootDisk__start_sd_partitions(void)
     return Success(MamaBootDisk, MamaBootDisk__new(0, &mama_sd_boot_config));
 }
 
-static Result(MamaBootDisk) MamaBootDisk__start_sd(void)
-{
-    match_result(
-        BootService__bootstrap(&bstr("/sbin/drivers/sdhci_channelio"), &empty_bstr(), &empty_bstr(), &mama_sd_device),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(MamaBootDisk, message, code);
-        }
-    );
-    return MamaBootDisk__start_sd_partitions();
-}
-
 static Result(MamaBootDisk) MamaBootDisk__from_hardware(ConstBootHardwareInfoPtr info)
 {
     match_optional(
@@ -107,10 +94,11 @@ static Result(MamaBootDisk) MamaBootDisk__from_hardware(ConstBootHardwareInfoPtr
         },
         none_do_nothing()
     );
-    match_optional(info->sd_host,
+    match_optional(
+        info->sd_host,
         some(sd_host)
         {
-            if (sd_host.kind == SD_HOST_KIND_BCM2835 ||
+            if (sd_host.kind == SD_HOST_KIND_PCI || sd_host.kind == SD_HOST_KIND_BCM2835 ||
                 (sd_host.kind == SD_HOST_KIND_CV181X &&
                  (info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V2 ||
                   info->interrupt_controller.kind == INTERRUPT_CONTROLLER_GIC_V3 ||
@@ -118,7 +106,7 @@ static Result(MamaBootDisk) MamaBootDisk__from_hardware(ConstBootHardwareInfoPtr
             {
                 return MamaBootDisk__start_sd_partitions();
             }
-            return MamaBootDisk__start_sd();
+            return Error(MamaBootDisk, bstr("Unsupported boot SD host"), SERVICE_DEVICE_REGISTRATION_FAILED);
         },
         none_do_nothing()
     );

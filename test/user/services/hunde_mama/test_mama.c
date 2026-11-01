@@ -263,6 +263,33 @@ void test_mama_bootstraps_partitions_without_restarting_hosted_sd_device(void)
     TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p3"), started[5]);
 }
 
+void test_mama_uses_hosted_pci_sd_device(void)
+{
+    use_sd_host = true;
+    sd_host_kind = SD_HOST_KIND_PCI;
+
+    TEST_ASSERT_EQUAL(1, mama_main());
+
+    TEST_ASSERT_TRUE(school_started);
+    TEST_ASSERT_TRUE(disk_ready_waited);
+    TEST_ASSERT_EQUAL(6, starts);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p2"), started[4]);
+    TEST_ASSERT_EQUAL_BSTRING(bstr("/dev/mmc0p3"), started[5]);
+}
+
+void test_mama_rejects_unsupported_sd_device_without_starting_a_driver(void)
+{
+    use_sd_host = true;
+    sd_host_kind = SD_HOST_KIND_GENERIC;
+
+    TEST_ASSERT_EQUAL(1, mama_main());
+
+    TEST_ASSERT_FALSE(school_started);
+    TEST_ASSERT_FALSE(disk_ready_waited);
+    TEST_ASSERT_EQUAL(4, starts);
+    TEST_ASSERT_EQUAL_UINT(0, hosted_starts);
+}
+
 void test_mama_uses_hosted_cv181x_on_gic(void)
 {
     use_sd_host = true;

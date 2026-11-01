@@ -801,9 +801,9 @@ IRQ delivery do not depend on that broker.
 VirtIO block I/O uses only its Channel server and managed shared buffers.
 QEMU PCI SDHCI runs as a read-only Rust `sdhci.wuff` inside the driver host,
 using local IRQ delivery for transfers and the existing Channel block protocol.
-The separate `sdhci_channelio` executable remains on physical Pi and CV18xx
-SD boot configurations. It runs its Channel server in a fibre and retains the
-read-only, polling PIO hardware implementation. SD write support is not implemented.
+The standalone C SDHCI executable is retired. Supported SD boot configurations
+use the Rust Wuff in the driver host; physical Pi EMMC2 is not supported.
+SD write support is not implemented.
 The `channel_blk`/`channel_fs` demo pair also uses the shared BlockServer and
 BlockClient APIs, not private request/reply rings. Unused `IO__block_read` and
 `IO__block_write` syscall helpers are deleted; general fibre support remains.

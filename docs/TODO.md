@@ -506,24 +506,23 @@ multi-process service graph. See the
   QEMU PCI and raspi4b SDHCI run as an interrupt-driven, read-only Rust
   `sdhci.wuff`. The AArch64 CV181x GIC path also runs the Rust Wuff and has
   passed physical Duo S login, block reads, and IRQ-delivery checks. RISC-V
-  CV181x now selects the Rust Wuff but awaits physical read and IRQ validation;
-  physical Pi retains the standalone polling C driver.
+  CV181x also passes physical read and IRQ validation. Physical Pi EMMC2 is
+  outside the supported SD-host scope.
   Other hardware drivers remain external. See
   [hosted UART receive](architecture/userspace/io-driver-hosts.md#hosted-uart-receive).
-- [ ] Validate the Rust SDHCI Wuff on physical Pi and CV18xx hardware, port
-  remaining platform-specific host setup, and retire the standalone C
-  SDHCI executable only after read parity and IRQ delivery pass on those targets.
+- [x] Validate the Rust SDHCI Wuff on CV18xx hardware and retire the standalone
+  C SDHCI executable after read parity and IRQ delivery pass on supported targets.
   QEMU raspi4b boot, partition reads, and routed IRQ delivery pass with the
   legacy BCM2835 controller. On the physical Duo S AArch64 path, the CV181x
   Rust Wuff exposes `/dev/mmc0`, reads `/boot/config/fstab` and the ext2 root,
   reaches Bash, and records `Rust SDHCI IRQ delivered` in `/proc/ktrace`.
-  RISC-V CV181x now selects the Rust Wuff but remains unvalidated on hardware;
-  physical Pi EMMC2 remains unvalidated with the Rust Wuff.
+  RISC-V CV181x also reaches Bash, reads the ext2 root, and records SDHCI IRQ
+  delivery in `/proc/ktrace`. Physical Pi EMMC2 is not supported by the Rust Wuff.
 - [ ] Remove standalone driver compatibility executables after full-system
   parity and measurements pass on AArch64 and RISC-V. The standalone UART RX/TX
   and VirtIO block executables were removed after their Rust Wuffs passed QEMU
-  smoke on both architectures. The standalone VirtIO keyboard executable is
-  replaced by a Rust Wuff; other driver compatibility executables remain.
+  smoke on both architectures. The standalone VirtIO keyboard and SDHCI
+  executables are replaced by Rust Wuffs; other driver compatibility executables remain.
 - [ ] Define host crash cleanup for device claims, IRQ routes, DMA, and requests
   before relying on automatic driver-host restart.
 - [ ] Investigate the RISC-V interrupt-manager instruction abort observed during
@@ -1732,8 +1731,9 @@ for architecture bring-up. See the
   checksum-pinned v2.0.1 firmware. The common interrupt path implements GICv2
   acknowledge/completion and timer PPI setup. The physical AArch64 image now
   reaches an interactive Bash prompt over UART0 with the Rust-hosted CV181x SD
-  driver, a mounted ext2 root, and a recorded SDHCI IRQ. Other peripheral and
-  RISC-V acceptance remains separate. See
+  driver, a mounted ext2 root, and a recorded SDHCI IRQ. RISC-V CV181x SD boot,
+  root reads, login, and SDHCI IRQ delivery now pass as well; other peripheral
+  acceptance remains separate. See
   [Milk-V Duo S](platforms/milkv-duo-s.md).
 
 - [x] Add a CV1800B-QEMU approximation with the Duo S kernel, DTB, 510 MiB RAM,
@@ -1762,9 +1762,9 @@ for architecture bring-up. See the
 - [x] Bootstrap the userspace CV181x SDHCI service before boot configuration,
   expose MBR partitions through the common block protocol, mount
   `/dev/mmc0p2` as `/boot/config`, and configure `/dev/mmc0p3` as root. The
-  controller, partition discovery, and `/boot/config` mount were verified on
-  RISC-V hardware; its root-mount completion remains to be validated. The
-  AArch64 Rust-hosted path reaches a mounted ext2 root and Bash. See
+  controller, partition discovery, `/boot/config` mount, ext2 root reads, login,
+  and IRQ delivery were verified on RISC-V hardware. The AArch64 Rust-hosted
+  path also reaches a mounted ext2 root and Bash. See
   [Milk-V Duo S](platforms/milkv-duo-s.md).
 - [x] Split the physical Duo S UART configuration after console bring-up. UART0
   carries early bootstrap output and the userspace console; after kernel handoff,
@@ -1777,7 +1777,7 @@ for architecture bring-up. See the
   kernel and driver syscall traces use UART1 independently. Synchronous shell
   startup now returns structured child-abort details for login to render on
   UART0. Physical AArch64 login and Bash now pass; independent UART1 tracing,
-  the shell fault path, and RISC-V login remain to be checked. See
+  and the shell fault path remain to be checked; RISC-V login now passes. See
   [Milk-V Duo S](platforms/milkv-duo-s.md).
 - [ ] Decide whether HundeOS should replace or reconfigure the stock firmware
   path to reclaim the C906L coprocessor. The current stock boot runs its RTOS

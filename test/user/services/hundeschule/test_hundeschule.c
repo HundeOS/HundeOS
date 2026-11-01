@@ -333,20 +333,18 @@ void test_hundeschule_uses_config_for_machine_bootstrap_drivers(void)
                   "driver /sbin/services/hund-rohr once\n"
                   "driver /sbin/drivers/hunde-bus once\n"
                   "driver /sbin/drivers/sysinfofs once\n"
-                  "driver /sbin/drivers/sdhci_channelio once\n"
                   "driver /sbin/drivers/video_term once framebuffer\n"
                   "driver /sbin/drivers/uart_rx respawn no-framebuffer\n";
 
     HundeschuleRequiredProcesses required_processes = HundeschuleRequiredProcesses__new();
     TEST_ASSERT_EQUAL_INT(0, Hundeschule__initialise_required_processes(&required_processes));
 
-    TEST_ASSERT_EQUAL_UINT64(6, spawn_call_count);
+    TEST_ASSERT_EQUAL_UINT64(5, spawn_call_count);
     TEST_ASSERT_EQUAL_STRING("/sbin/services/hund-verfolgen", spawn_calls[0].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/hunde-bus", spawn_calls[1].path);
     TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sysinfofs", spawn_calls[2].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/sdhci_channelio", spawn_calls[3].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/video_term", spawn_calls[4].path);
-    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[5].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/drivers/video_term", spawn_calls[3].path);
+    TEST_ASSERT_EQUAL_STRING("/sbin/services/hundeschau", spawn_calls[4].path);
     TEST_ASSERT_EQUAL_UINT64(4, fake_wait_ready_count);
     TEST_ASSERT_TRUE(fake_config_opened);
     TEST_ASSERT_TRUE(fake_config_closed);

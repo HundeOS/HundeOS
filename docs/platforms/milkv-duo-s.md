@@ -206,10 +206,10 @@ then becomes the interactive userspace console. UART1 begins receiving kernel
 diagnostics after the architecture-neutral handoff. Exit `picocom` with
 Ctrl-A followed by Ctrl-X.
 
-The AArch64 Milk-V Duo S image also enables `KERNEL_MEMORY_TRACE`. Post-handoff
-kernel trace continues to the trace UART and is simultaneously retained in a
-bounded memory ring. With only the UART0 console adapter connected, inspect the
-newest 12 KiB after login with:
+Both Milk-V Duo S images enable `KERNEL_MEMORY_TRACE`. Post-handoff kernel
+trace is retained in a bounded memory ring; the AArch64 image also sends it to
+the trace UART. With only the UART0 console adapter connected, inspect the newest
+12 KiB after login with:
 
 ```sh
 cat /proc/ktrace
@@ -257,11 +257,9 @@ When the boot hardware describes an SD host, `hunde-mama` starts partition
 services which validate the MBR and expose `/dev/mmc0p2` and `/dev/mmc0p3`,
 mounts `/dev/mmc0p2` at `/boot/config`, and then lets `humpen` mount
 `/dev/mmc0p3` as root according to `fstab`. The AArch64 GIC path hosts the
-CV181x `sdhci.wuff` inside `hunde-treiber-host`; the RISC-V PLIC path now selects
-the same Wuff but awaits physical read and IRQ validation. Neither path depends on a
-VirtIO configuration disk. The earlier RISC-V hardware checkpoint verified
-card initialization, partition discovery, and `/boot/config`, but not root
-mount or login.
+CV181x `sdhci.wuff` inside `hunde-treiber-host`; the RISC-V PLIC path uses
+the same Wuff and passes physical root reads, login, and IRQ-delivery checks.
+Neither path depends on a VirtIO configuration disk.
 
 The physical AArch64 image now reaches an interactive `bash-5.3$` prompt on
 UART0. `ps` shows `hunde-treiber-host` and both partition services, with no
@@ -269,7 +267,8 @@ standalone SDHCI process. `/dev/mmc0` reports 512-byte blocks and 122265600
 sectors; `/boot/config/fstab` names `/dev/mmc0p3` as root; `/hello.txt` reads
 `hello from ext2`; and `/proc/ktrace` records `Rust SDHCI IRQ delivered` before
 the ext2 root is ready. This validates the Rust CV181x read and IRQ path on
-the AArch64 board, not the RISC-V path or UART1 tracing.
+the AArch64 board. The RISC-V board separately passed the same SDHCI read and
+IRQ checks; independent UART1 tracing remains unverified.
 The CVITEK RTC is described accurately but is not published as a Goldfish RTC
 because its register interface requires a separate userspace driver.
 

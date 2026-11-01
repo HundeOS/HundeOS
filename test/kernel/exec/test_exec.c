@@ -230,17 +230,6 @@ void test_exec_apply_builtin_identity_policy_marks_boot_hundeschule_as_hund(void
     TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, process->group_id);
 }
 
-void test_exec_apply_builtin_identity_policy_marks_sdhci_as_hund(void)
-{
-    ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);
-    process->name = bstr("/sbin/drivers/sdhci_channelio");
-
-    Exec__apply_builtin_identity_policy(process);
-
-    TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, process->user_id);
-    TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_HUND, process->group_id);
-}
-
 void test_exec_apply_builtin_identity_policy_marks_block_partition_as_hund(void)
 {
     ProcessPtr process = dummy_process(0, cpu, PROC_STATE_NEW);

@@ -119,23 +119,6 @@ IOReply IOClient__wait_file_change(IOFileWatch * watches, size_t count)
 }
 
 #include "../../../../user/lib/sys/io.c"
-#include "../../../../user/lib/sys/sd_host_config.h"
-
-static DynString dyn_string_from_cstr(const char * text)
-{
-    DynString string;
-    match_result(DynString__init(&string, 128),
-        success_do_nothing(),
-        error_test_fail()
-    );
-
-    match_result(DynString__append_cstr(&string, text),
-        success_do_nothing(),
-        error_test_fail()
-    );
-
-    return string;
-}
 
 void setUp(void)
 {
@@ -289,64 +272,4 @@ void test_io_file_info_uses_one_path_request(void)
     );
     TEST_ASSERT_EQUAL(IO_REQUEST_FILE_INFO, last_operation);
     TEST_ASSERT_EQUAL_BSTRING(bstr("/tmp/file"), last_path_request.path);
-}
-
-void test_sd_host_config_parse_reads_present_host(void)
-{
-    DynString sysinfo = dyn_string_from_cstr("machine=qemu_virt\n"
-                                             "sd_host.present=1\n"
-                                             "sd_host.physical_base=0xfe340000\n"
-                                             "sd_host.mmio_size=0x100\n"
-                                             "sd_host.irq=126\n"
-                                             "sd_host.kind=2\n"
-                                             "sd_host.source_clock_hz=375000000\n");
-
-    match_optional(
-        SdHostConfig__parse(&sysinfo),
-        some(config)
-        {
-            TEST_ASSERT_EQUAL_HEX64(0xfe340000, config.physical_base);
-            TEST_ASSERT_EQUAL_HEX64(0x100, config.mmio_size);
-            TEST_ASSERT_EQUAL_UINT64(126, config.irq);
-            TEST_ASSERT_EQUAL(SD_HOST_KIND_CV181X, config.kind);
-            TEST_ASSERT_EQUAL_UINT64(375000000, config.source_clock_hz);
-        },
-        none_test_fail()
-    );
-
-    DynString__dispose(&sysinfo);
-}
-
-void test_sd_host_config_parse_returns_none_when_host_absent(void)
-{
-    DynString sysinfo = dyn_string_from_cstr("sd_host.present=0\n"
-                                             "sd_host.physical_base=0xfe340000\n"
-                                             "sd_host.mmio_size=0x100\n"
-                                             "sd_host.irq=126\n"
-                                             "sd_host.kind=2\n"
-                                             "sd_host.source_clock_hz=375000000\n");
-
-    match_optional(SdHostConfig__parse(&sysinfo),
-        some_test_fail(),
-        none_do_nothing()
-    );
-
-    DynString__dispose(&sysinfo);
-}
-
-void test_sd_host_config_parse_rejects_partial_numeric_values(void)
-{
-    DynString sysinfo = dyn_string_from_cstr("sd_host.present=1\n"
-                                             "sd_host.physical_base=0xfe340000tail\n"
-                                             "sd_host.mmio_size=0x100\n"
-                                             "sd_host.irq=126\n"
-                                             "sd_host.kind=2\n"
-                                             "sd_host.source_clock_hz=375000000\n");
-
-    match_optional(SdHostConfig__parse(&sysinfo),
-        some_test_fail(),
-        none_do_nothing()
-    );
-
-    DynString__dispose(&sysinfo);
 }
