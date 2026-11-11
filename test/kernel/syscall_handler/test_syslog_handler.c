@@ -29,7 +29,7 @@ void test_syslog_handler_writes_process_message_to_kernel_logger(void)
     Optional(ProcessPtr) proc = Some(ProcessPtr, process);
 
     match_result(
-        Syslog__handler(NULL, &Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
+        Syslog__handler(NULL, &Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SYSLOG_OK, code);
@@ -51,7 +51,7 @@ void test_syslog_handler_writes_tagged_process_message_to_kernel_logger(void)
     Optional(ProcessPtr) proc = Some(ProcessPtr, process);
 
     match_result(
-        Syslog__handler(NULL, &Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
+        Syslog__handler(NULL, &Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SYSLOG_OK, code);
@@ -70,7 +70,7 @@ void test_syslog_handler_rejects_missing_message(void)
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
 
     match_result(
-        Syslog__handler(NULL, &Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        Syslog__handler(NULL, &Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {

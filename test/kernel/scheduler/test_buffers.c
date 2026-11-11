@@ -36,7 +36,7 @@ void setUp(void)
     server = dummy_process(20, 0, PROC_STATE_READY);
     client = dummy_process(30, 0, PROC_STATE_READY);
     manager->name = bstr("/sbin/services/hunde-puffer");
-    manager->process_class = server->process_class = PROCESS_CLASS_SERVICE;
+    manager->scheduling.process_class = server->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(manager);
     Process__set_hund_identity(server);
     Scheduler__schedule_on_cpu(kernel->scheduler, manager, 0);
@@ -53,8 +53,8 @@ void tearDown(void)
 
 static bool mapped(ProcessPtr process, Address address, bool write)
 {
-    return check_address_mapped(ProcessPageTable__root_table(&process->page_table), address, true, write, false,
-                                BUFFER_SIZE);
+    return check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table), address, true, write,
+                                false, BUFFER_SIZE);
 }
 
 static BufferID create(BufferDirection direction)
@@ -185,7 +185,7 @@ void test_kernel_reads_require_expected_server_and_reject_retired_buffers(void)
 
 void test_service_buffers_cannot_be_freed_or_reassigned_after_both_services_exit(void)
 {
-    client->process_class = PROCESS_CLASS_SERVICE;
+    client->scheduling.process_class = PROCESS_CLASS_SERVICE;
     BufferID id = create(BUFFER_READ);
     BufferDescriptor descriptor = BufferDescriptor__new(id, BUFFER_READ);
     TEST_ASSERT_EQUAL(BUFFER_RETAINED | BUFFER_CLIENT_ATTACHED | BUFFER_SERVER_ATTACHED,
@@ -226,7 +226,7 @@ void test_dma_range_requires_retained_server_lease_direction_and_bounds(void)
             TEST_ASSERT_EQUAL(BUFFER_DENIED, code);
         }
     );
-    client->process_class = PROCESS_CLASS_SERVICE;
+    client->scheduling.process_class = PROCESS_CLASS_SERVICE;
     BufferID id = create(BUFFER_READ);
     Address backing = 0;
     match_optional(

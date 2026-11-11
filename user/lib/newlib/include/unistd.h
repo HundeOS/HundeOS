@@ -45,6 +45,8 @@ pid_t getpid(void);
 pid_t getppid(void);
 pid_t getpgrp(void);
 pid_t getpgid(pid_t pid);
+pid_t tcgetpgrp(int descriptor);
+int tcsetpgrp(int descriptor, pid_t process_group_id);
 int setpgid(pid_t pid, pid_t process_group_id);
 pid_t setsid(void);
 uid_t getuid(void);

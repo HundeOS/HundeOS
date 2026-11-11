@@ -34,7 +34,7 @@ Result(RegisterResult) SyscallDispatcher__register(SyscallDispatcherPtr self, Sy
 }
 
 Result(SystemCallResult)
-    SyscallDispatcher__dispatch(SyscallDispatcherPtr self, KernelPtr kernel, OptionalPtr(ProcessPtr) process_opt,
+    SyscallDispatcher__dispatch(SyscallDispatcherPtr self, KernelPtr kernel, OptionalPtr(ThreadPtr) thread_opt,
                                 SystemCall syscall_id, Anything arg1, Anything arg2, Anything arg3, Anything arg4,
                                 Anything arg5)
 {
@@ -45,7 +45,15 @@ Result(SystemCallResult)
         Handlers__get(&self->handlers, syscall_id),
         some(handler)
         {
-            return handler(kernel, process_opt, arg1, arg2, arg3, arg4, arg5);
+            Optional(ProcessPtr) process = None(ProcessPtr);
+            match_optional(*thread_opt,
+                some(thread)
+                {
+                    process = Some(ProcessPtr, thread->owner);
+                },
+                none_do_nothing()
+            );
+            return handler(kernel, &process, arg1, arg2, arg3, arg4, arg5, thread_opt);
         },
         none()
         {

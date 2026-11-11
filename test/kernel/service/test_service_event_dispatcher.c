@@ -29,7 +29,7 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
 {
     ServiceEventDispatcher dispatcher = ServiceEventDispatcher__new();
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
 
     match_result(
         ServiceEventDispatcher__subscribe_irq(&dispatcher, process, 48),
@@ -58,7 +58,7 @@ void test_service_event_dispatcher_dispatches_irq_and_completes_active_irq(void)
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__masked_irq());
     TEST_ASSERT_EQUAL_UINT64(1, Arch__mask_count());
-    TEST_ASSERT_EQUAL(1, ServiceEvents__len(&process->service.events));
+    TEST_ASSERT_EQUAL(1, ServiceEvents__len(&process->service_state.service.events));
 
     match_result(
         ServiceEventDispatcher__take_next(&dispatcher, process),
@@ -87,7 +87,7 @@ void test_service_event_dispatcher_coalesces_memory_pressure_to_latest_level(voi
 {
     ServiceEventDispatcher dispatcher = ServiceEventDispatcher__new();
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ServiceEvent low = ServiceEvent__new(SERVICE_EVENT_MEMORY_PRESSURE, MEM_PRESSURE_LOW, 100);
     ServiceEvent critical = ServiceEvent__new(SERVICE_EVENT_MEMORY_PRESSURE, MEM_PRESSURE_CRITICAL, 50);
 
@@ -95,7 +95,7 @@ void test_service_event_dispatcher_coalesces_memory_pressure_to_latest_level(voi
                       unwrap_result(ServiceEventDispatcher__enqueue(&dispatcher, process, low), SERVICE_ABORT));
     TEST_ASSERT_EQUAL(SERVICE_OK,
                       unwrap_result(ServiceEventDispatcher__enqueue(&dispatcher, process, critical), SERVICE_ABORT));
-    TEST_ASSERT_EQUAL(1, ServiceEvents__len(&process->service.events));
+    TEST_ASSERT_EQUAL(1, ServiceEvents__len(&process->service_state.service.events));
 
     match_result(
         ServiceEventDispatcher__take_next(&dispatcher, process),

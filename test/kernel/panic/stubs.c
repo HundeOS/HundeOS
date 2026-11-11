@@ -41,7 +41,7 @@ const char * ArtworkTest__output(void)
     return artwork_output;
 }
 
-void Kernel__dump_state(ProcessContextPtr context)
+void Kernel__dump_state(ThreadContextPtr context)
 {
 }
 

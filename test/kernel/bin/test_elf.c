@@ -29,6 +29,103 @@ static Elf load_test_elf()
     return unwrap_optional(EmbeddedElf__load(&bstr("hello_world")), (Elf){});
 }
 
+static Elf tls_test_elf(uint8_t * image, size_t size)
+{
+    Elf source = load_test_elf();
+    Elf64HeaderPtr header = (Elf64HeaderPtr)image;
+    *header = (Elf64Header){
+        .magic = {0x7f, 'E', 'L', 'F'},
+        .klass = 2,
+        .endianness = LittleEndian,
+        .ei_version = 1,
+        .type = Executable,
+        .machine = Elf__read_header(&source)->machine,
+        .elf_version = 1,
+        .entry = 0x4100,
+        .header_size = sizeof(Elf64Header),
+        .program_header_offset = sizeof(Elf64Header),
+        .program_header_entry_size = sizeof(ProgramHeader),
+        .program_header_entries = 2,
+    };
+    ProgramHeaderPtr headers = (ProgramHeaderPtr)(image + sizeof(Elf64Header));
+    headers[0] = (ProgramHeader){.type = Load,
+                                 .flags = Read | Execute,
+                                 .virtual_address = 0x4000,
+                                 .file_size = size,
+                                 .memory_size = size,
+                                 .alignment = 4096};
+    headers[1] = (ProgramHeader){.type = ThreadlocalTemplate,
+                                 .virtual_address = 0x4140,
+                                 .segment_offset = 0x140,
+                                 .file_size = 8,
+                                 .memory_size = 64,
+                                 .alignment = 64};
+    return Elf__new((Address)image, (Address)(image + size), &bstr("tls_test"));
+}
+
+void test_tls_image_reports_initialized_and_zero_fill_sizes(void)
+{
+    uint8_t image[512] = {0};
+    Elf elf = tls_test_elf(image, sizeof(image));
+    match_result(Elf__validate(&elf),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(
+        Elf__thread_local_image(&elf),
+        success(tls)
+        {
+            TEST_ASSERT_EQUAL_HEX64(0x4140, tls.address);
+            TEST_ASSERT_EQUAL_UINT64(8, tls.initialized_size);
+            TEST_ASSERT_EQUAL_UINT64(64, tls.size);
+            TEST_ASSERT_EQUAL_UINT64(64, tls.alignment);
+        },
+        error_test_fail()
+    );
+}
+
+void test_tls_image_rejects_initializer_outside_load_segment(void)
+{
+    uint8_t image[512] = {0};
+    Elf elf = tls_test_elf(image, sizeof(image));
+    ProgramHeaderPtr headers = (ProgramHeaderPtr)(image + sizeof(Elf64Header));
+    headers[1].virtual_address = 0x5000;
+    match_result(Elf__validate(&elf),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_NOT_EQUAL(0, code);
+        }
+    );
+}
+
+void test_tls_image_rejects_multiple_templates_and_oversized_initializer(void)
+{
+    uint8_t image[512] = {0};
+    Elf elf = tls_test_elf(image, sizeof(image));
+    ProgramHeaderPtr headers = (ProgramHeaderPtr)(image + sizeof(Elf64Header));
+    ((Elf64HeaderPtr)image)->program_header_entries = 3;
+    headers[2] = headers[1];
+    match_result(
+        Elf__thread_local_image(&elf),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_NOT_EQUAL(0, code);
+        }
+    );
+    ((Elf64HeaderPtr)image)->program_header_entries = 2;
+    headers[1].file_size = 65;
+    match_result(
+        Elf__thread_local_image(&elf),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_NOT_EQUAL(0, code);
+        }
+    );
+}
+
 static Elf dynamic_test_elf(uint8_t * image, size_t size, const char * interpreter, size_t interpreter_size)
 {
     Elf source = load_test_elf();

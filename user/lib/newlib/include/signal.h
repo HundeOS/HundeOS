@@ -58,6 +58,11 @@ struct sigaction
     int sa_flags;
 };
 
+static inline struct sigaction SignalAction__new(sig_t handler, int flags)
+{
+    return (struct sigaction){.sa_handler = handler, .sa_mask = 0, .sa_flags = flags};
+}
+
 #define SA_ONSTACK 0x0001
 #define SA_RESTART 0x0002
 #define SA_RESETHAND 0x0004

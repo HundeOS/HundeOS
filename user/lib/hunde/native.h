@@ -12,6 +12,19 @@ typedef struct RustNativeLayout
     uint64_t alignment;
 } RustNativeLayout;
 
+typedef struct RustNativeValue
+{
+    HundeStatusResult status;
+    uint64_t value;
+} RustNativeValue;
+
+_Static_assert(sizeof(RustNativeValue) == 40, "Native value ABI changed");
+
+static inline RustNativeValue RustNativeValue__new(HundeStatusResult status, uint64_t value)
+{
+    return (RustNativeValue){.status = status, .value = value};
+}
+
 static inline RustNativeLayout RustNativeLayout__new(uint64_t size, uint64_t alignment)
 {
     return (RustNativeLayout){.size = size, .alignment = alignment};
@@ -93,6 +106,11 @@ static inline HundeStatusResult RustNative__error(int32_t code)
     return HundeStatusResult__error(code, HundeByteSpan__new((const uint8_t *)"OS operation failed", 19));
 }
 
+static inline HundeStatusResult HundeStatusResult__new_pending(void)
+{
+    return (HundeStatusResult){.kind = HUNDE_IO_PENDING};
+}
+
 static inline HundeStatusResult RustNative__unknown_error(void)
 {
     return HundeStatusResult__error(RESULT_UNKNOWN_ERROR_CODE,
@@ -105,6 +123,7 @@ bool RustIOCallbacks__disconnect(IOServiceContext self, QueueConnectionID sessio
 IOReply RustIOCallbacks__execute_local(ConstRustIOCallbacksPtr self, uint64_t pid, IORequestPtr request);
 
 RustNativeLayout hunde_rust_module_layout(void);
+uint64_t hunde_rust_monotonic_usec(void);
 RustNativeLayout hunde_rust_devfs_layout(void);
 void hunde_rust_devfs_init(void * storage);
 HundeIOCompletion hunde_rust_devfs_execute(void * storage, ConstHundeIORequestV6Ptr input);
@@ -119,6 +138,7 @@ HundeIOCompletion hunde_rust_terminal_read(int64_t handle, uint8_t * data, uint6
 HundeIOCompletion hunde_rust_terminal_write(int64_t handle, const uint8_t * data, uint64_t length);
 HundeStatusResult hunde_rust_terminal_close(int64_t handle);
 HundeStatusResult hunde_rust_terminal_interrupt(uint64_t pid);
+HundeStatusResult hunde_rust_terminal_interrupt_group(uint64_t group);
 RustBlockOpenResult hunde_rust_block_open(void * storage, HundeByteSpan path);
 HundeStatusResult hunde_rust_block_read(void * storage, uint64_t sector, uint8_t * destination, uint64_t length);
 HundeStatusResult hunde_rust_block_write(void * storage, uint64_t sector, const uint8_t * source, uint64_t length);

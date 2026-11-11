@@ -15,7 +15,7 @@
 #include "../stubs/page_table.h"
 #include "../stubs/kalloc.h"
 #include "../stubs/process.h"
-#include "../stubs/process_context_layout.h"
+#include "../stubs/thread_context_layout.h"
 
 static KernelPtr kernel;
 
@@ -38,7 +38,7 @@ static Elf load_hello_world_elf(void)
 static UserAllocation allocation_at(ProcessPtr process, uint64_t index)
 {
     match_optional(
-        UserAllocations__at(&process->user_allocations, index),
+        UserAllocations__at(&process->address_space.user_allocations, index),
         some(allocation)
         {
             return allocation;
@@ -81,10 +81,86 @@ void tearDown(void)
     TEST_ASSERT_FALSE(panic_occurred());
 }
 
+void test_thread_starts_with_its_own_stack_and_no_context(void)
+{
+    Process process = {0};
+    Stack stack = Stack__new(4096);
+    Thread thread = Thread__new(&process, &stack);
+
+    TEST_ASSERT_EQUAL_PTR(&process, thread.owner);
+    TEST_ASSERT_EQUAL_UINT64(stack.size, thread.stack.size);
+    TEST_ASSERT_TRUE(is_nothing(thread.context));
+    TEST_ASSERT_EQUAL(PROC_STATE_NEW, thread.state);
+    TEST_ASSERT_TRUE(thread.migration_safe);
+    TEST_ASSERT_TRUE(is_nothing(thread.queue_wait_doorbell));
+    TEST_ASSERT_EQUAL(0, ParkedOperations__len(&thread.parked_operations));
+    TEST_ASSERT_EQUAL(0, ProcessSignalFrames__len(&thread.signal_frames));
+}
+
+void test_process_setup_initializes_owned_groups(void)
+{
+    Elf elf = load_hello_world_elf();
+    match_result(
+        Process__setup(kernel, &elf, &None(ProcessPtr)),
+        success(process)
+        {
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE, process->address_space.heap_break);
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE, process->address_space.heap_mapped_end);
+            TEST_ASSERT_TRUE(is_nothing(process->address_space.idle_debug_address));
+            TEST_ASSERT_TRUE(is_nothing(process->ipc.ipc_doorbell));
+            TEST_ASSERT_TRUE(is_nothing(process->ipc.queue_wait_control));
+            TEST_ASSERT_EQUAL(PROCESS_CLASS_NORMAL, process->scheduling.process_class);
+            TEST_ASSERT_FALSE(process->service_state.memory_reclaimer);
+            TEST_ASSERT_EQUAL(0, ClaimedMmioBases__len(&process->address_space.claimed_mmio_bases));
+            TEST_ASSERT_TRUE(process->lifecycle.execed_since_fork);
+            TEST_ASSERT_TRUE(is_nothing(process->lifecycle.abort));
+            TEST_ASSERT_EQUAL(1, ProcessThreads__len(&process->threads));
+            TEST_ASSERT_FALSE(Process__has_multiple_threads(process));
+        },
+        error_test_fail()
+    );
+}
+
+void test_fork_rejects_sibling_before_copying_address_space(void)
+{
+    Elf elf = load_hello_world_elf();
+    match_result(
+        Process__setup(kernel, &elf, &None(ProcessPtr)),
+        success(process)
+        {
+            Thread sibling = Thread__new(process, &process->thread.stack);
+            process->thread.state = PROC_STATE_RUNNING;
+            match_result(ProcessThreads__push(&process->threads, &sibling),
+                success_do_nothing(),
+                error_test_fail()
+            );
+            TEST_ASSERT_TRUE(Process__has_multiple_threads(process));
+            uint64_t unpublished_before = PageTableStub__unpublished_map_count();
+            match_result(
+                Process__fork(process),
+                success(_)
+                {
+                    TEST_FAIL();
+                },
+                error(code, message)
+                {
+                    TEST_ASSERT_EQUAL(PROCESS_FORK_UNSUPPORTED_STATE, code);
+                }
+            );
+            TEST_ASSERT_EQUAL(unpublished_before, PageTableStub__unpublished_map_count());
+            match_result(ProcessThreads__remove(&process->threads, &sibling),
+                success_do_nothing(),
+                error_test_fail()
+            );
+        },
+        error_test_fail()
+    );
+}
+
 void test_process_store_context_copies_saved_frame(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
-    ProcessContext source = {
+    ThreadContext source = {
         .x = {0x1122},
         .sp = 0x3344,
         .elr = 0x5566,
@@ -97,7 +173,7 @@ void test_process_store_context_copies_saved_frame(void)
         Process__store_context(process, &source),
         success(code)
         {
-            TEST_ASSERT_EQUAL(PROCESS_CONTEXT_SAVE_OK, code);
+            TEST_ASSERT_EQUAL(THREAD_CONTEXT_SAVE_OK, code);
         },
         error_test_fail()
     );
@@ -110,10 +186,34 @@ void test_process_store_context_copies_saved_frame(void)
     TEST_ASSERT_EQUAL_UINT64(source.fpsr, Process__required_context(process)->fpsr);
 }
 
+void test_thread_store_context_does_not_overwrite_another_thread(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
+    ThreadContextPtr initial_context = Process__required_context(process);
+    uint64_t initial_elr = initial_context->elr;
+    ThreadContext sibling_context = {.elr = 0x1234};
+    ThreadContext source = {.elr = 0x5678};
+    Thread sibling = Thread__new(process, &process->thread.stack);
+    sibling.context = Some(ThreadContextPtr, &sibling_context);
+    sibling.state = PROC_STATE_RUNNING;
+
+    match_result(
+        Thread__store_context(&sibling, &source),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(THREAD_CONTEXT_SAVE_OK, code);
+        },
+        error_test_fail()
+    );
+
+    TEST_ASSERT_EQUAL_UINT64(source.elr, sibling_context.elr);
+    TEST_ASSERT_EQUAL_UINT64(initial_elr, initial_context->elr);
+}
+
 void test_process_store_context_returns_error_when_process_is_not_running(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
-    ProcessContext source = {.elr = 0x5566};
+    ThreadContext source = {.elr = 0x5566};
     uint64_t original_elr = Process__required_context(process)->elr;
 
     match_result(
@@ -121,7 +221,7 @@ void test_process_store_context_returns_error_when_process_is_not_running(void)
         success_test_fail(),
         error(code, message)
         {
-            TEST_ASSERT_EQUAL(PROCESS_CONTEXT_SAVE_INVALID_STATE, code);
+            TEST_ASSERT_EQUAL(THREAD_CONTEXT_SAVE_INVALID_STATE, code);
             TEST_ASSERT_EQUAL_BSTRING(bstr("Process not running state=PROC_STATE_WAITING pid=16 name=hello_world\n"),
                                       message);
         }
@@ -136,10 +236,10 @@ void test_process_save_context_without_a_trap_frame_does_not_change_context(void
     uint64_t original_elr = Process__required_context(process)->elr;
 
     match_result(
-        Process__save_context(process, &None(ProcessContextPtr)),
+        Process__save_context(process, &None(ThreadContextPtr)),
         success(code)
         {
-            TEST_ASSERT_EQUAL(PROCESS_CONTEXT_SAVE_OK, code);
+            TEST_ASSERT_EQUAL(THREAD_CONTEXT_SAVE_OK, code);
         },
         error_test_fail()
     );
@@ -191,7 +291,7 @@ void test_process_signal_handler_entry_and_return_restore_context_and_mask(void)
         .mask = handler_mask,
         .flags = 0,
     };
-    ProcessContext interrupted = {
+    ThreadContext interrupted = {
         .x = {0x1122},
         .sp = 0x3344,
         .elr = 0x5566,
@@ -222,14 +322,14 @@ void test_process_signal_handler_entry_and_return_restore_context_and_mask(void)
     TEST_ASSERT_EQUAL_UINT64(action.handler, interrupted.elr);
     TEST_ASSERT_EQUAL_UINT64(user_mask | handler_mask | (1ULL << (PROCESS_SIGNAL_INTERRUPT - 1)),
                              Process__signal_mask(process));
-    TEST_ASSERT_EQUAL_UINT64(1, ProcessSignalFrames__len(&process->signal_frames));
+    TEST_ASSERT_EQUAL_UINT64(1, ProcessSignalFrames__len(&process->thread.signal_frames));
 
     match_result(Process__restore_signal_context(process),
         success_do_nothing(),
         error_test_fail()
     );
     TEST_ASSERT_EQUAL_UINT64(user_mask, Process__signal_mask(process));
-    TEST_ASSERT_EQUAL_UINT64(0, ProcessSignalFrames__len(&process->signal_frames));
+    TEST_ASSERT_EQUAL_UINT64(0, ProcessSignalFrames__len(&process->thread.signal_frames));
     TEST_ASSERT_EQUAL_UINT64(0x1122, Process__required_context(process)->x[0]);
     TEST_ASSERT_EQUAL_UINT64(0x3344, Process__required_context(process)->sp);
     TEST_ASSERT_EQUAL_UINT64(0x5566, Process__required_context(process)->elr);
@@ -243,7 +343,7 @@ void test_process_signal_handler_interrupts_nonrestartable_wait_with_eintr(void)
         .handler = 0x12340000,
         .restorer = 0x56780000,
     };
-    ProcessContext interrupted = {
+    ThreadContext interrupted = {
         .x = {0x1122},
         .elr = 0x5568,
     };
@@ -294,7 +394,7 @@ void test_process_signal_handler_restarts_restartable_wait_when_requested(void)
         .restorer = 0x56780000,
         .flags = PROCESS_SIGNAL_ACTION_RESTART,
     };
-    ProcessContext interrupted = {
+    ThreadContext interrupted = {
         .x = {0x1122},
         .elr = 0x5568,
     };
@@ -367,7 +467,7 @@ void test_process_alarm_replaces_cancels_and_expires_once(void)
 void test_process_default_and_ignored_signal_dispositions_are_delivered(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
-    ProcessContext context = {0};
+    ThreadContext context = {0};
 
     Process__queue_signal(process, PROCESS_SIGNAL_CHILD);
     match_result(
@@ -394,7 +494,7 @@ void test_process_default_and_ignored_signal_dispositions_are_delivered(void)
 void test_process_default_stop_and_continue_dispositions_are_distinct(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_RUNNING);
-    ProcessContext context = {0};
+    ThreadContext context = {0};
 
     Process__queue_signal(process, PROCESS_SIGNAL_TERMINAL_STOP);
     match_result(
@@ -494,12 +594,12 @@ void test_setup_from_elf(void)
         Process__setup(kernel, &elf, &None(ProcessPtr)),
         success(process)
         {
-            TEST_ASSERT_EQUAL(Elf__read_header(&elf)->entry, process->entry_point.virtual_addr);
-            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table), 0x400000, true, false,
-                                             true, PAGE_SIZE));
-            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table), BASE_STACK, true, true,
-                                             false, 2 * 1024 * 1024));
-            TEST_ASSERT_EQUAL_UINT64(2 * 1024 * 1024, process->stack.size);
+            TEST_ASSERT_EQUAL(Elf__read_header(&elf)->entry, process->image.entry_point.virtual_addr);
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table), 0x400000,
+                                             true, false, true, PAGE_SIZE));
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             BASE_STACK, true, true, false, 2 * 1024 * 1024));
+            TEST_ASSERT_EQUAL_UINT64(2 * 1024 * 1024, process->thread.stack.size);
         },
         error_test_fail()
     );
@@ -512,7 +612,7 @@ void test_setup_maps_service_directory(void)
         Process__setup(kernel, &elf, &None(ProcessPtr)),
         success(process)
         {
-            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
                                              HUND_SERVICE_DIRECTORY_VADDR, true, false, false,
                                              HUND_SERVICE_DIRECTORY_SIZE));
         },
@@ -527,10 +627,11 @@ void test_setup_tracks_static_user_allocations(void)
         Process__setup(kernel, &elf, &None(ProcessPtr)),
         success(process)
         {
-            TEST_ASSERT_EQUAL(3, process->user_allocations.len);
-            Optional(UserAllocation) args_allocation = UserAllocations__at(&process->user_allocations, 0);
-            Optional(UserAllocation) elf_allocation = UserAllocations__at(&process->user_allocations, 1);
-            Optional(UserAllocation) stack_allocation = UserAllocations__at(&process->user_allocations, 2);
+            TEST_ASSERT_EQUAL(3, process->address_space.user_allocations.len);
+            Optional(UserAllocation) args_allocation = UserAllocations__at(&process->address_space.user_allocations, 0);
+            Optional(UserAllocation) elf_allocation = UserAllocations__at(&process->address_space.user_allocations, 1);
+            Optional(UserAllocation) stack_allocation =
+                UserAllocations__at(&process->address_space.user_allocations, 2);
             UserAllocation args = allocation_at(process, 0);
             UserAllocation elf = allocation_at(process, 1);
             UserAllocation stack = allocation_at(process, 2);
@@ -547,13 +648,15 @@ void test_fork_eagerly_copies_private_memory_and_resets_process_state(void)
 {
     PageTableStub__reset_publish_tracking();
     ProcessPtr parent = dummy_process(80, 0, PROC_STATE_RUNNING);
+    parent->image.thread_local_image = ThreadLocalImage__new(0x4000, 16, 64, 32);
+    ThreadContext__set_thread_pointer(Process__required_context(parent), 0x12340);
     Process__set_identity(parent, PROCESS_USER_USER, PROCESS_GROUP_USER, PROCESS_CAP_NONE);
     ProcessSignalMask blocked = 1ULL << (PROCESS_SIGNAL_USER_1 - 1);
     ProcessSignalAction action = {
         .handler = 0x12340000,
         .restorer = 0x56780000,
     };
-    parent->pending_signals = 1ULL << (PROCESS_SIGNAL_INTERRUPT - 1);
+    parent->signals.pending_signals = 1ULL << (PROCESS_SIGNAL_INTERRUPT - 1);
     match_result(Process__set_signal_mask(parent, PROCESS_SIGNAL_MASK_SET, blocked),
         success_do_nothing(),
                  error_test_fail()
@@ -563,12 +666,12 @@ void test_fork_eagerly_copies_private_memory_and_resets_process_state(void)
                  error_test_fail()
     );
     UserAllocation shared = {.type = USER_ALLOCATION_SHARED};
-    match_result(UserAllocations__push(&parent->user_allocations, shared),
+    match_result(UserAllocations__push(&parent->address_space.user_allocations, shared),
         success_do_nothing(),
-        error_test_fail()
+                 error_test_fail()
     );
-    parent->queue_wait_control = Some(UserAddress, (UserAddress){.valid = true});
-    parent->ipc_doorbell = Some(UserAddress, (UserAddress){.valid = true});
+    parent->ipc.queue_wait_control = Some(UserAddress, (UserAddress){.valid = true});
+    parent->ipc.ipc_doorbell = Some(UserAddress, (UserAddress){.valid = true});
     match_result(
         Process__alloc_user_pages(parent, PAGE_SIZE * 2),
         success(allocation)
@@ -587,36 +690,42 @@ void test_fork_eagerly_copies_private_memory_and_resets_process_state(void)
         success(child)
         {
             TEST_ASSERT_EQUAL_UINT64(parent->pid, unwrap_optional(child->parent_pid, 0));
+            TEST_ASSERT_EQUAL_HEX64(0x12340, ThreadContext__thread_pointer(Process__required_context(child)));
+            TEST_ASSERT_EQUAL_HEX64(0x4000, child->image.thread_local_image.address);
+            TEST_ASSERT_EQUAL_UINT64(16, child->image.thread_local_image.initialized_size);
+            TEST_ASSERT_EQUAL_UINT64(64, child->image.thread_local_image.size);
+            TEST_ASSERT_EQUAL_UINT64(32, child->image.thread_local_image.alignment);
             TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_USER, child->user_id);
             TEST_ASSERT_EQUAL_UINT64(PROCESS_GROUP_USER, child->group_id);
-            TEST_ASSERT_EQUAL_UINT64(0, child->pending_signals);
+            TEST_ASSERT_EQUAL_UINT64(0, child->signals.pending_signals);
             TEST_ASSERT_EQUAL_UINT64(blocked, Process__signal_mask(child));
             TEST_ASSERT_EQUAL_UINT64(action.handler, Process__signal_action(child, PROCESS_SIGNAL_INTERRUPT).handler);
-            TEST_ASSERT_EQUAL(PROC_STATE_NEW, child->state);
-            TEST_ASSERT_EQUAL(UserAllocations__len(&parent->user_allocations) - 1,
-                              UserAllocations__len(&child->user_allocations));
-            TEST_ASSERT_TRUE(is_nothing(child->queue_wait_control));
-            TEST_ASSERT_TRUE(is_nothing(child->ipc_doorbell));
+            TEST_ASSERT_EQUAL(PROC_STATE_NEW, child->thread.state);
+            TEST_ASSERT_EQUAL(UserAllocations__len(&parent->address_space.user_allocations) - 1,
+                              UserAllocations__len(&child->address_space.user_allocations));
+            TEST_ASSERT_TRUE(is_nothing(child->ipc.queue_wait_control));
+            TEST_ASSERT_TRUE(is_nothing(child->ipc.ipc_doorbell));
             TEST_ASSERT_EQUAL_UINT64(0, Process__required_context(child)->x[0]);
-            TEST_ASSERT_EQUAL_UINT64(UserAllocations__len(&child->user_allocations),
+            TEST_ASSERT_EQUAL_UINT64(UserAllocations__len(&child->address_space.user_allocations),
                                      PageTableStub__unpublished_map_count());
             TEST_ASSERT_EQUAL_UINT64(1, PageTableStub__publish_count());
 
-            ListIndex parent_dynamic_index = (ListIndex)UserAllocations__len(&parent->user_allocations) - 1;
-            ListIndex child_dynamic_index = (ListIndex)UserAllocations__len(&child->user_allocations) - 1;
+            ListIndex parent_dynamic_index =
+                (ListIndex)UserAllocations__len(&parent->address_space.user_allocations) - 1;
+            ListIndex child_dynamic_index = (ListIndex)UserAllocations__len(&child->address_space.user_allocations) - 1;
             UserAllocation parent_allocation = unwrap_optional(
-                UserAllocations__at(&parent->user_allocations, parent_dynamic_index), (UserAllocation){});
-            UserAllocation child_allocation =
-                unwrap_optional(UserAllocations__at(&child->user_allocations, child_dynamic_index), (UserAllocation){});
+                UserAllocations__at(&parent->address_space.user_allocations, parent_dynamic_index), (UserAllocation){});
+            UserAllocation child_allocation = unwrap_optional(
+                UserAllocations__at(&child->address_space.user_allocations, child_dynamic_index), (UserAllocation){});
             TEST_ASSERT_EQUAL_UINT64(parent_allocation.address.virtual_addr, child_allocation.address.virtual_addr);
             TEST_ASSERT_NOT_EQUAL(parent_allocation.address.kernel_addr.virtual_addr,
                                   child_allocation.address.kernel_addr.virtual_addr);
             TEST_ASSERT_EQUAL_MEMORY((void *)parent_allocation.address.kernel_addr.virtual_addr,
                                      (void *)child_allocation.address.kernel_addr.virtual_addr, PAGE_SIZE * 2);
-            TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&child->page_table),
+            TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&child->address_space.page_table),
                                                   child_allocation.address.virtual_addr, true, false, false,
                                                   PAGE_SIZE));
-            TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&child->page_table),
+            TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&child->address_space.page_table),
                                                   child_allocation.address.virtual_addr + PAGE_SIZE, true, true, false,
                                                   PAGE_SIZE));
             *(uint8_t *)child_allocation.address.kernel_addr.virtual_addr = 0xa5;
@@ -642,7 +751,7 @@ void test_fork_eagerly_copies_private_memory_and_resets_process_state(void)
 void test_fork_rejects_service_process_without_creating_a_child(void)
 {
     ProcessPtr parent = dummy_process(81, 0, PROC_STATE_RUNNING);
-    parent->process_class = PROCESS_CLASS_SERVICE;
+    parent->scheduling.process_class = PROCESS_CLASS_SERVICE;
 
     match_result(
         Process__fork(parent),
@@ -679,48 +788,52 @@ void test_nested_fork_excludes_runtime_ipc_backing_and_recreates_it_once_per_chi
         Process__queue_wait_control(parent),
         success(parent_control)
         {
-            size_t inherited_count = UserAllocations__len(&parent->user_allocations) - 2;
-            UserAddress parent_doorbell = unwrap_optional(parent->ipc_doorbell, NULL_USER_ADDRESS);
+            size_t inherited_count = UserAllocations__len(&parent->address_space.user_allocations) - 2;
+            UserAddress parent_doorbell = unwrap_optional(parent->ipc.ipc_doorbell, NULL_USER_ADDRESS);
             match_result(
                 Process__fork(parent),
                 success(child)
                 {
-                    TEST_ASSERT_EQUAL_UINT64(inherited_count, UserAllocations__len(&child->user_allocations));
-                    TEST_ASSERT_TRUE(is_nothing(child->ipc_doorbell));
-                    TEST_ASSERT_TRUE(is_nothing(child->queue_wait_control));
-                    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&child->page_table),
-                                                           IPC_DOORBELL_ADDRESS, true, true, false, PAGE_SIZE));
-                    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&child->page_table),
-                                                           parent_control, true, true, false, PAGE_SIZE));
-                    child->state = PROC_STATE_RUNNING;
+                    TEST_ASSERT_EQUAL_UINT64(inherited_count,
+                                             UserAllocations__len(&child->address_space.user_allocations));
+                    TEST_ASSERT_TRUE(is_nothing(child->ipc.ipc_doorbell));
+                    TEST_ASSERT_TRUE(is_nothing(child->ipc.queue_wait_control));
+                    TEST_ASSERT_FALSE(
+                        check_address_mapped(ProcessPageTable__root_table(&child->address_space.page_table),
+                                             IPC_DOORBELL_ADDRESS, true, true, false, PAGE_SIZE));
+                    TEST_ASSERT_FALSE(
+                        check_address_mapped(ProcessPageTable__root_table(&child->address_space.page_table),
+                                             parent_control, true, true, false, PAGE_SIZE));
+                    child->thread.state = PROC_STATE_RUNNING;
                     match_result(
                         Process__queue_wait_control(child),
                         success(child_control)
                         {
-                            UserAddress child_doorbell = unwrap_optional(child->ipc_doorbell, NULL_USER_ADDRESS);
+                            UserAddress child_doorbell = unwrap_optional(child->ipc.ipc_doorbell, NULL_USER_ADDRESS);
                             TEST_ASSERT_EQUAL_UINT64(inherited_count + 2,
-                                                     UserAllocations__len(&child->user_allocations));
+                                                     UserAllocations__len(&child->address_space.user_allocations));
                             TEST_ASSERT_NOT_EQUAL(parent_doorbell.kernel_addr.virtual_addr,
                                                   child_doorbell.kernel_addr.virtual_addr);
                             match_result(
                                 Process__fork(child),
                                 success(grandchild)
                                 {
-                                    TEST_ASSERT_EQUAL_UINT64(inherited_count,
-                                                             UserAllocations__len(&grandchild->user_allocations));
-                                    TEST_ASSERT_TRUE(is_nothing(grandchild->ipc_doorbell));
-                                    TEST_ASSERT_TRUE(is_nothing(grandchild->queue_wait_control));
+                                    TEST_ASSERT_EQUAL_UINT64(
+                                        inherited_count,
+                                        UserAllocations__len(&grandchild->address_space.user_allocations));
+                                    TEST_ASSERT_TRUE(is_nothing(grandchild->ipc.ipc_doorbell));
+                                    TEST_ASSERT_TRUE(is_nothing(grandchild->ipc.queue_wait_control));
                                     match_result(
                                         Process__queue_wait_control(grandchild),
                                         success(grandchild_control)
                                         {
                                             UserAddress grandchild_doorbell =
-                                                unwrap_optional(grandchild->ipc_doorbell, NULL_USER_ADDRESS);
+                                                unwrap_optional(grandchild->ipc.ipc_doorbell, NULL_USER_ADDRESS);
                                             TEST_ASSERT_NOT_EQUAL(child_doorbell.kernel_addr.virtual_addr,
                                                                   grandchild_doorbell.kernel_addr.virtual_addr);
                                             TEST_ASSERT_EQUAL_UINT64(
                                                 inherited_count + 2,
-                                                UserAllocations__len(&grandchild->user_allocations));
+                                                UserAllocations__len(&grandchild->address_space.user_allocations));
                                         },
                                         error_test_fail()
                                     );
@@ -764,7 +877,7 @@ void test_setup_with_args_sets_up_multiple_argv_entries(void)
             TEST_ASSERT_EQUAL_STRING("one", ptr(kernel_base + (argv[1] - user_base), char));
             TEST_ASSERT_EQUAL_STRING("two", ptr(kernel_base + (argv[2] - user_base), char));
             TEST_ASSERT_EQUAL_STRING("three", ptr(kernel_base + (argv[3] - user_base), char));
-            ProcessContextPtr context = Process__required_context(process);
+            ThreadContextPtr context = Process__required_context(process);
             TEST_ASSERT_EQUAL_UINT64(0, context->x[7]);
         },
         error_test_fail()
@@ -784,10 +897,10 @@ void test_process_alloc_user_pages_maps_and_tracks_dynamic_allocation(void)
                 {
                     TEST_ASSERT_EQUAL(USER_ALLOC_BASE + PAGE_SIZE, address.virtual_addr);
                     UserAllocation allocation = allocation_at(process, 3);
-                    TEST_ASSERT_EQUAL(4, process->user_allocations.len);
+                    TEST_ASSERT_EQUAL(4, process->address_space.user_allocations.len);
                     TEST_ASSERT_EQUAL(USER_ALLOCATION_DYNAMIC, allocation.type);
                     TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
-                    TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
+                    TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
                                                      USER_ALLOC_BASE + PAGE_SIZE, true, true, false, PAGE_SIZE));
                 },
                 error_test_fail()
@@ -811,7 +924,7 @@ void test_process_alloc_user_pages_returns_memory_full_when_user_allocation_fail
                 error(code, message)
                 {
                     TEST_ASSERT_EQUAL(PROCESS_MEMORY_FULL, code);
-                    TEST_ASSERT_EQUAL(3, UserAllocations__len(&process->user_allocations));
+                    TEST_ASSERT_EQUAL(3, UserAllocations__len(&process->address_space.user_allocations));
                 }
             );
         },
@@ -842,9 +955,9 @@ void test_process_map_shared_user_pages_maps_source_pages_into_target_process(vo
                             UserAllocation allocation = allocation_at(target, 3);
                             TEST_ASSERT_EQUAL(USER_ALLOCATION_SHARED, allocation.type);
                             TEST_ASSERT_EQUAL(PAGE_SIZE * 2, allocation.size);
-                            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&target->page_table),
-                                                             USER_ALLOC_BASE + PAGE_SIZE, true, true, false,
-                                                             PAGE_SIZE * 2));
+                            TEST_ASSERT(
+                                check_address_mapped(ProcessPageTable__root_table(&target->address_space.page_table),
+                                                     USER_ALLOC_BASE + PAGE_SIZE, true, true, false, PAGE_SIZE * 2));
                         },
                         error_test_fail()
                     );
@@ -882,9 +995,9 @@ void test_process_map_shared_user_pages_preserves_offset_inside_source_page(void
                             UserAllocation allocation = allocation_at(target, 3);
                             TEST_ASSERT_EQUAL(USER_ALLOCATION_SHARED, allocation.type);
                             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
-                            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&target->page_table),
-                                                             USER_ALLOC_BASE + PAGE_SIZE, true, true, false,
-                                                             PAGE_SIZE));
+                            TEST_ASSERT(
+                                check_address_mapped(ProcessPageTable__root_table(&target->address_space.page_table),
+                                                     USER_ALLOC_BASE + PAGE_SIZE, true, true, false, PAGE_SIZE));
                         },
                         error_test_fail()
                     );
@@ -923,9 +1036,9 @@ void test_process_map_shared_user_pages_maps_offset_range_spanning_next_page(voi
                             UserAllocation allocation = allocation_at(target, 3);
                             TEST_ASSERT_EQUAL(USER_ALLOCATION_SHARED, allocation.type);
                             TEST_ASSERT_EQUAL(PAGE_SIZE * 2, allocation.size);
-                            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&target->page_table),
-                                                             USER_ALLOC_BASE + PAGE_SIZE, true, true, false,
-                                                             PAGE_SIZE * 2));
+                            TEST_ASSERT(
+                                check_address_mapped(ProcessPageTable__root_table(&target->address_space.page_table),
+                                                     USER_ALLOC_BASE + PAGE_SIZE, true, true, false, PAGE_SIZE * 2));
                         },
                         error_test_fail()
                     );
@@ -990,8 +1103,9 @@ void test_process_free_user_pages_unmaps_shared_allocation_without_freeing_sourc
                                 error_test_fail()
                             );
 
-                            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&target->page_table),
-                                                                   shared.virtual_addr, true, true, false, PAGE_SIZE));
+                            TEST_ASSERT_FALSE(
+                                check_address_mapped(ProcessPageTable__root_table(&target->address_space.page_table),
+                                                     shared.virtual_addr, true, true, false, PAGE_SIZE));
                             match_result(
                                 Process__device_address(source, source_address.virtual_addr),
                                 success(physical)
@@ -1042,9 +1156,9 @@ void test_process_map_shared_user_pages_with_allocation_returns_mapping_and_allo
                                 error_test_fail()
                             );
 
-                            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&target->page_table),
-                                                                   shared.allocation.virtual_addr, true, true, false,
-                                                                   PAGE_SIZE * 2));
+                            TEST_ASSERT_FALSE(
+                                check_address_mapped(ProcessPageTable__root_table(&target->address_space.page_table),
+                                                     shared.allocation.virtual_addr, true, true, false, PAGE_SIZE * 2));
                         },
                         error_test_fail()
                     );
@@ -1105,8 +1219,8 @@ void test_process_free_user_pages_unmaps_and_removes_dynamic_allocation(void)
                 error_test_fail()
             );
 
-            TEST_ASSERT_EQUAL(3, process->user_allocations.len);
-            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
+            TEST_ASSERT_EQUAL(3, process->address_space.user_allocations.len);
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
                                                    USER_ALLOC_BASE + PAGE_SIZE, true, true, false, PAGE_SIZE));
         },
         error_test_fail()
@@ -1167,8 +1281,9 @@ void test_process_alloc_aligned_user_pages_aligns_virtual_address(void)
                 success(address)
                 {
                     TEST_ASSERT_EQUAL(0, address.virtual_addr % (PAGE_SIZE * 16));
-                    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
-                                                          address.virtual_addr, true, true, false, PAGE_SIZE));
+                    TEST_ASSERT_TRUE(
+                        check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             address.virtual_addr, true, true, false, PAGE_SIZE));
                 },
                 error_test_fail()
             );
@@ -1219,8 +1334,9 @@ void test_process_protect_user_pages_replaces_whole_allocation_permissions(void)
                 success(code)
                 {
                     TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, code);
-                    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
-                                                          address.virtual_addr, true, false, true, PAGE_SIZE));
+                    TEST_ASSERT_TRUE(
+                        check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             address.virtual_addr, true, false, true, PAGE_SIZE));
                     TEST_ASSERT_TRUE(
                         is_nothing(Process__writable_user_kernel_mapping(process, address.virtual_addr, PAGE_SIZE)));
                 },
@@ -1244,11 +1360,12 @@ void test_process_protect_user_pages_splits_partial_allocation_permissions(void)
                 success(code)
                 {
                     TEST_ASSERT_EQUAL(PROCESS_MEMORY_OK, code);
-                    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
-                                                          address.virtual_addr, true, false, false, PAGE_SIZE));
-                    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
-                                                          address.virtual_addr + PAGE_SIZE, true, true, false,
-                                                          PAGE_SIZE));
+                    TEST_ASSERT_TRUE(
+                        check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             address.virtual_addr, true, false, false, PAGE_SIZE));
+                    TEST_ASSERT_TRUE(
+                        check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             address.virtual_addr + PAGE_SIZE, true, true, false, PAGE_SIZE));
                     TEST_ASSERT_TRUE(
                         is_nothing(Process__writable_user_kernel_mapping(process, address.virtual_addr, PAGE_SIZE)));
                     TEST_ASSERT_TRUE(is_something(
@@ -1295,13 +1412,13 @@ void test_process_dispose_user_allocations_unmaps_all_user_allocations(void)
                 error_test_fail()
             );
 
-            TEST_ASSERT_EQUAL(0, process->user_allocations.len);
-            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), 0x400000, true,
-                                                   false, true, 101));
-            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), BASE_STACK, true,
-                                                   true, false, STACK_SIZE));
-            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), USER_ALLOC_BASE,
-                                                   true, true, false, PAGE_SIZE));
+            TEST_ASSERT_EQUAL(0, process->address_space.user_allocations.len);
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                                   0x400000, true, false, true, 101));
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                                   BASE_STACK, true, true, false, STACK_SIZE));
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                                   USER_ALLOC_BASE, true, true, false, PAGE_SIZE));
         },
         error_test_fail()
     );
@@ -1314,10 +1431,10 @@ void test_process_dispose_page_table_frees_owned_pages_and_tracking_nodes(void)
         Process__setup(kernel, &elf, &None(ProcessPtr)),
         success(process)
         {
-            size_t page_count = ProcessPageTable__page_count(&process->page_table);
+            size_t page_count = ProcessPageTable__page_count(&process->address_space.page_table);
             size_t free_count_before = KAllocStub__free_count();
             size_t mappings_before = MemoryMappings__len(&kernel->memory_accounting.mappings);
-            Address space = ProcessPageTable__root(&process->page_table).virtual_addr;
+            Address space = ProcessPageTable__root(&process->address_space.page_table).virtual_addr;
 
             match_result(Process__dispose_page_table(process),
                 success_do_nothing(),
@@ -1336,8 +1453,8 @@ void test_process_dispose_page_table_frees_owned_pages_and_tracking_nodes(void)
                 },
                 none_test_fail()
             );
-            TEST_ASSERT_EQUAL(0, ProcessPageTable__page_count(&process->page_table));
-            TEST_ASSERT_FALSE(ProcessPageTable__root(&process->page_table).valid);
+            TEST_ASSERT_EQUAL(0, ProcessPageTable__page_count(&process->address_space.page_table));
+            TEST_ASSERT_FALSE(ProcessPageTable__root(&process->address_space.page_table).valid);
         },
         error_test_fail()
     );
@@ -1361,7 +1478,7 @@ void test_process_claimed_device_is_reset_before_memory_disposal(void)
                 error_test_fail()
             );
             TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr, test_reset_device);
-            TEST_ASSERT_EQUAL_UINT64(0, ProcessVirtioDevices__len(&process->virtio_devices));
+            TEST_ASSERT_EQUAL_UINT64(0, ClaimedMmioBases__len(&process->address_space.claimed_mmio_bases));
             test_reset_device = 0;
             Process__quiesce_device(process);
             TEST_ASSERT_EQUAL_UINT64(0, test_reset_device);
@@ -1386,12 +1503,12 @@ void test_process_claims_and_quiesces_multiple_virtio_devices(void)
                 success_do_nothing(),
                          error_test_fail()
             );
-            TEST_ASSERT_EQUAL_UINT64(2, ProcessVirtioDevices__len(&process->virtio_devices));
+            TEST_ASSERT_EQUAL_UINT64(2, ClaimedMmioBases__len(&process->address_space.claimed_mmio_bases));
 
             test_reset_device = 0;
             Process__quiesce_device(process);
             TEST_ASSERT_EQUAL_UINT64(mmio.virtual_addr + 0x200, test_reset_device);
-            TEST_ASSERT_EQUAL_UINT64(0, ProcessVirtioDevices__len(&process->virtio_devices));
+            TEST_ASSERT_EQUAL_UINT64(0, ClaimedMmioBases__len(&process->address_space.claimed_mmio_bases));
         },
         error_test_fail()
     );
@@ -1415,7 +1532,7 @@ void test_process_rejects_unsupported_virtio_device_without_claiming_it(void)
                 }
             );
             test_virtio_device_supported = true;
-            TEST_ASSERT_EQUAL_UINT64(0, ProcessVirtioDevices__len(&process->virtio_devices));
+            TEST_ASSERT_EQUAL_UINT64(0, ClaimedMmioBases__len(&process->address_space.claimed_mmio_bases));
         },
         error_test_fail()
     );
@@ -1434,7 +1551,8 @@ void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void
                 success(mmio)
                 {
                     match_optional(
-                        UserAllocations__at(&process->user_allocations, process->user_allocations.len - 1),
+                        UserAllocations__at(&process->address_space.user_allocations,
+                                            process->address_space.user_allocations.len - 1),
                         some(allocation)
                         {
                             TEST_ASSERT_EQUAL(USER_ALLOCATION_MMIO, allocation.type);
@@ -1444,8 +1562,9 @@ void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void
                         none_test_fail()
                     );
 
-                    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
-                                                          mmio.virtual_addr, true, true, false, PAGE_SIZE));
+                    TEST_ASSERT_TRUE(
+                        check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             mmio.virtual_addr, true, true, false, PAGE_SIZE));
 
                     match_result(
                         Process__dispose_user_allocations(process),
@@ -1456,9 +1575,10 @@ void test_process_dispose_user_allocations_unmaps_mmio_without_freeing_heap(void
                         error_test_fail()
                     );
 
-                    TEST_ASSERT_EQUAL(0, process->user_allocations.len);
-                    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
-                                                           mmio.virtual_addr, true, true, false, PAGE_SIZE));
+                    TEST_ASSERT_EQUAL(0, process->address_space.user_allocations.len);
+                    TEST_ASSERT_FALSE(
+                        check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             mmio.virtual_addr, true, true, false, PAGE_SIZE));
                 },
                 error_test_fail()
             );
@@ -1484,7 +1604,8 @@ void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
                     TEST_ASSERT_EQUAL(physical, mmio.kernel_addr.virtual_addr);
 
                     match_optional(
-                        UserAllocations__at(&process->user_allocations, process->user_allocations.len - 1),
+                        UserAllocations__at(&process->address_space.user_allocations,
+                                            process->address_space.user_allocations.len - 1),
                         some(allocation)
                         {
                             TEST_ASSERT_EQUAL(USER_ALLOCATION_MMIO, allocation.type);
@@ -1495,8 +1616,9 @@ void test_process_map_mmio_returns_pointer_at_requested_physical_offset(void)
                         none_test_fail()
                     );
 
-                    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
-                                                          mmio.virtual_addr, true, true, false, 0x200));
+                    TEST_ASSERT_TRUE(
+                        check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             mmio.virtual_addr, true, true, false, 0x200));
                 },
                 error_test_fail()
             );
@@ -1512,7 +1634,7 @@ void test_process_map_trapped_mmio_records_authorized_range_without_page_mapping
         Process__map_trapped_mmio(process, 0x70000000, PAGE_SIZE),
         success(mmio)
         {
-            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
+            TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
                                                    mmio.virtual_addr, true, true, false, PAGE_SIZE));
             match_optional(
                 Process__readable_mmio_mapping(process, mmio.virtual_addr + 0x84, sizeof(uint32_t)),
@@ -1685,15 +1807,15 @@ void test_process_sbrk_maps_pages_at_heap_break(void)
                 error_test_fail()
             );
 
-            TEST_ASSERT_EQUAL(USER_HEAP_BASE + 123, process->heap_break);
-            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->heap_mapped_end);
-            TEST_ASSERT_EQUAL(4, process->user_allocations.len);
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE + 123, process->address_space.heap_break);
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->address_space.heap_mapped_end);
+            TEST_ASSERT_EQUAL(4, process->address_space.user_allocations.len);
 
             UserAllocation allocation = allocation_at(process, 3);
             TEST_ASSERT_EQUAL(USER_ALLOCATION_HEAP, allocation.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
-            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table), USER_HEAP_BASE, true,
-                                             true, false, PAGE_SIZE));
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                             USER_HEAP_BASE, true, true, false, PAGE_SIZE));
         },
         error_test_fail()
     );
@@ -1717,9 +1839,9 @@ void test_process_sbrk_growth_inside_mapped_page_does_not_map_more_pages(void)
                 error_test_fail()
             );
 
-            TEST_ASSERT_EQUAL(USER_HEAP_BASE + 223, process->heap_break);
-            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->heap_mapped_end);
-            TEST_ASSERT_EQUAL(4, process->user_allocations.len);
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE + 223, process->address_space.heap_break);
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->address_space.heap_mapped_end);
+            TEST_ASSERT_EQUAL(4, process->address_space.user_allocations.len);
         },
         error_test_fail()
     );
@@ -1735,13 +1857,13 @@ void test_process_sbrk_growth_across_page_maps_from_previous_mapped_end(void)
             Process__sbrk(process, 123);
             Process__sbrk(process, PAGE_SIZE);
 
-            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE * 2, process->heap_mapped_end);
-            TEST_ASSERT_EQUAL(5, process->user_allocations.len);
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE * 2, process->address_space.heap_mapped_end);
+            TEST_ASSERT_EQUAL(5, process->address_space.user_allocations.len);
 
             UserAllocation allocation = allocation_at(process, 4);
             TEST_ASSERT_EQUAL(USER_ALLOCATION_HEAP, allocation.type);
             TEST_ASSERT_EQUAL(PAGE_SIZE, allocation.size);
-            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->page_table),
+            TEST_ASSERT(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
                                              USER_HEAP_BASE + PAGE_SIZE, true, true, false, PAGE_SIZE));
         },
         error_test_fail()
@@ -1766,8 +1888,8 @@ void test_process_sbrk_can_shrink_without_unmapping_pages(void)
                 error_test_fail()
             );
 
-            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE - 100, process->heap_break);
-            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->heap_mapped_end);
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE - 100, process->address_space.heap_break);
+            TEST_ASSERT_EQUAL(USER_HEAP_BASE + PAGE_SIZE, process->address_space.heap_mapped_end);
         },
         error_test_fail()
     );
@@ -1801,7 +1923,7 @@ void test_process_allocations_cannot_grow_into_service_or_shared_page_regions(vo
         success(process)
         {
             match_optional(
-                UserAllocations__ptr_at(&process->user_allocations, 0),
+                UserAllocations__ptr_at(&process->address_space.user_allocations, 0),
                 some(allocation)
                 {
                     allocation->address.virtual_addr = USER_ALLOC_BASE;
@@ -1852,8 +1974,8 @@ void test_process_sbrk_returns_memory_full_when_user_allocation_fails(void)
                 error(code, message)
                 {
                     TEST_ASSERT_EQUAL(PROCESS_MEMORY_FULL, code);
-                    TEST_ASSERT_EQUAL(USER_HEAP_BASE, process->heap_break);
-                    TEST_ASSERT_EQUAL(USER_HEAP_BASE, process->heap_mapped_end);
+                    TEST_ASSERT_EQUAL(USER_HEAP_BASE, process->address_space.heap_break);
+                    TEST_ASSERT_EQUAL(USER_HEAP_BASE, process->address_space.heap_mapped_end);
                 }
             );
         },
@@ -1905,8 +2027,8 @@ void test_process_child_inherits_parent_identity(void)
 void test_process_mark_parked_operation_ready_matches_operation_key(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
-    KernelContext first_context = KernelContext__new(&None(ProcessID), &None(SchedulerPtr));
-    KernelContext second_context = KernelContext__new(&None(ProcessID), &None(SchedulerPtr));
+    KernelContext first_context = KernelContext__new(&None(ThreadPtr), &None(SchedulerPtr));
+    KernelContext second_context = KernelContext__new(&None(ThreadPtr), &None(SchedulerPtr));
     ParkedOperationPtr first = ParkedOperation__heap_new(&first_context, &None(Continuation), PARK_WAIT_IO);
     ParkedOperationPtr second = ParkedOperation__heap_new(&second_context, &None(Continuation), PARK_WAIT_IO);
     first->operation_key = Some(OperationKey, 10);
@@ -1957,10 +2079,82 @@ void test_process_mark_parked_operation_ready_matches_operation_key(void)
     );
 }
 
+void test_thread_parked_operation_readiness_does_not_select_sibling(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
+    Stack stack = Stack__new(4096);
+    Thread sibling = Thread__new(process, &stack);
+    KernelContext first_context = KernelContext__new(&Some(ThreadPtr, &process->thread), &None(SchedulerPtr));
+    KernelContext sibling_context = KernelContext__new(&Some(ThreadPtr, &sibling), &None(SchedulerPtr));
+    ParkedOperationPtr first = ParkedOperation__heap_new(&first_context, &None(Continuation), PARK_WAIT_IO);
+    ParkedOperationPtr second = ParkedOperation__heap_new(&sibling_context, &None(Continuation), PARK_WAIT_IO);
+
+    match_result(Thread__push_parked_operation(&process->thread, first),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    match_result(Thread__push_parked_operation(&sibling, second),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    TEST_ASSERT_TRUE(Thread__has_parked_operation(&sibling, PARK_WAIT_IO, &None(OperationKey)));
+    TEST_ASSERT_FALSE(Thread__has_ready_parked_operation(&sibling, PARK_WAIT_IO, &None(OperationKey)));
+    TEST_ASSERT_TRUE(
+        Thread__mark_parked_operation_ready(&sibling, PARK_WAIT_IO, &None(OperationKey), &Some(ReturnCode, 123)));
+    TEST_ASSERT_TRUE(Thread__has_ready_parked_operation(&sibling, PARK_WAIT_IO, &None(OperationKey)));
+    TEST_ASSERT_FALSE(Thread__has_ready_parked_operation(&process->thread, PARK_WAIT_IO, &None(OperationKey)));
+
+    match_optional(
+        Thread__pop_ready_parked_operation(&sibling),
+        some(ready)
+        {
+            TEST_ASSERT_EQUAL_PTR(second, ready);
+            ParkedOperation__dispose(ready);
+        },
+        none_test_fail()
+    );
+    match_optional(
+        Process__pop_parked_operation(process),
+        some(remaining)
+        {
+            TEST_ASSERT_EQUAL_PTR(first, remaining);
+            ParkedOperation__dispose(remaining);
+        },
+        none_test_fail()
+    );
+}
+
+void test_thread_signal_mask_does_not_hide_signal_from_sibling(void)
+{
+    ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
+    Stack stack = Stack__new(4096);
+    Thread sibling = Thread__new(process, &stack);
+    ProcessSignalMask interrupt_mask = 1ULL << (PROCESS_SIGNAL_INTERRUPT - 1);
+
+    match_result(Thread__set_signal_mask(&process->thread, PROCESS_SIGNAL_MASK_BLOCK, interrupt_mask),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    Process__queue_signal(process, PROCESS_SIGNAL_INTERRUPT);
+
+    TEST_ASSERT_FALSE(Thread__can_resume_for_signal(&process->thread));
+    TEST_ASSERT_TRUE(Thread__can_resume_for_signal(&sibling));
+    match_optional(
+        Thread__take_pending_signal(&sibling),
+        some(signal)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INTERRUPT, signal);
+        },
+        none_test_fail()
+    );
+    TEST_ASSERT_FALSE(Process__has_pending_signal(process));
+}
+
 void test_process_wake_expired_sleep_ignores_process_that_is_not_sleeping(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_WAITING);
-    KernelContext context = KernelContext__new(&None(ProcessID), &None(SchedulerPtr));
+    KernelContext context = KernelContext__new(&None(ThreadPtr), &None(SchedulerPtr));
     ParkedOperationPtr sleep = ParkedOperation__heap_new(&context, &None(Continuation), PARK_SLEEP);
     sleep->operation_key = Some(OperationKey, 1);
 
@@ -1970,7 +2164,7 @@ void test_process_wake_expired_sleep_ignores_process_that_is_not_sleeping(void)
     );
 
     TEST_ASSERT_FALSE(Process__wake_expired_sleep(process, 2));
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, process->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, process->thread.state);
     TEST_ASSERT_FALSE(ParkedOperation__is_ready(sleep));
 
     match_optional(
@@ -1987,7 +2181,7 @@ void test_process_wake_expired_sleep_ignores_process_that_is_not_sleeping(void)
 void test_terminal_endpoints_inherit_without_kernel_io_resources(void)
 {
     ProcessPtr parent = dummy_process(1, 0, PROC_STATE_RUNNING);
-    parent->startup_stdio =
+    parent->image.startup_stdio =
         SpawnStdio__new(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
     ProcessPtr child = dummy_process_with_parent(2, 0, PROC_STATE_READY, parent);
     Process__prepare_startup_stdio(child);
@@ -2001,7 +2195,7 @@ void test_terminal_endpoints_inherit_without_kernel_io_resources(void)
 void test_spawn_stdio_resolves_standard_endpoints_and_rejects_general_handles(void)
 {
     ProcessPtr parent = dummy_process(1, 0, PROC_STATE_RUNNING);
-    parent->startup_stdio =
+    parent->image.startup_stdio =
         SpawnStdio__new(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
     SpawnStdio request = SpawnStdio__new(IO_ENDPOINT_KEYBOARD_INPUT, 2, 1);
     match_result(

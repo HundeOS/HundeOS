@@ -6,7 +6,7 @@ use core::cell::RefCell;
 use hunde::abi::IoError;
 use hunde::component::IoComponent;
 use hunde::inheritance::{Grants, Owner};
-use hunde::io::{Handle, Operation, ProcessId, Reply, Request, SessionId};
+use hunde::io::{Handle, Operation, ProcessGroupId, ProcessId, Reply, Request, SessionId};
 use hunde::protocol::*;
 use hunde::terminal::{Attributes, Stream};
 
@@ -64,10 +64,17 @@ pub(crate) fn terminal_path(path: &str) -> bool {
 
 struct Input {
     bytes: VecDeque<u8>,
-    foreground: Option<(Owner, ProcessId)>,
+    foreground: Option<(Owner, Foreground)>,
     interrupted: Option<ProcessId>,
+    interrupted_group: Option<ProcessGroupId>,
     error: Option<IoError>,
     attributes: Attributes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Foreground {
+    Process(ProcessId),
+    Group(ProcessGroupId),
 }
 
 impl Input {
@@ -76,16 +83,19 @@ impl Input {
             bytes: VecDeque::new(),
             foreground: None,
             interrupted: None,
+            interrupted_group: None,
             error: None,
             attributes: Attributes::new(),
         }
     }
 
-    fn receive(&mut self, byte: u8) -> Option<ProcessId> {
-        if byte == 3
-            && let Some((_, pid)) = self.foreground
+    fn receive(&mut self, byte: u8) -> Option<Foreground> {
+        if self.attributes.local_flags & IO_TERMINAL_LOCAL_SIGNALS as u32 != 0
+            && byte == self.attributes.control_characters[0]
+            && let Some((_, target)) = self.foreground
         {
-            return Some(pid);
+            self.bytes.clear();
+            return Some(target);
         }
         self.bytes.push_back(byte);
         None
@@ -229,6 +239,14 @@ impl<Backend: Output> IoComponent for Console<Backend> {
                             input.interrupted = None;
                             return Err(IoError(IO_INTERRUPTED));
                         }
+                        if let Some(group) = input.interrupted_group
+                            && input
+                                .foreground
+                                .is_some_and(|(_, target)| target == Foreground::Group(group))
+                        {
+                            input.interrupted_group = None;
+                            return Err(IoError(IO_INTERRUPTED));
+                        }
                         if input.bytes.is_empty() && !buffer.is_empty() {
                             if let Some(error) = input.error {
                                 return Err(error);
@@ -257,7 +275,32 @@ impl<Backend: Output> IoComponent for Console<Backend> {
                     }
                     Operation::SetForegroundProcess(pid) if flags & IO_OPEN_READ != 0 => {
                         let mut input = self.input.borrow_mut();
-                        input.foreground = if pid.0 == 0 { None } else { Some((owner, pid)) };
+                        input.foreground = if pid.0 == 0 {
+                            None
+                        } else {
+                            Some((owner, Foreground::Process(pid)))
+                        };
+                        input.interrupted = None;
+                        input.interrupted_group = None;
+                        Reply::Value(0)
+                    }
+                    Operation::GetForegroundGroup => {
+                        let group = match self.input.borrow().foreground {
+                            Some((_, Foreground::Group(group))) => group.0,
+                            _ => return Err(IoError(IO_OPERATION_NOT_SUPPORTED)),
+                        };
+                        Reply::Value(group as i64)
+                    }
+                    Operation::SetForegroundGroup(group)
+                        if group.0 > 0 && group.0 <= i64::MAX as u64 =>
+                    {
+                        let mut input = self.input.borrow_mut();
+                        if input.foreground.map(|(_, target)| target)
+                            != Some(Foreground::Group(group))
+                        {
+                            input.interrupted_group = None;
+                        }
+                        input.foreground = Some((owner, Foreground::Group(group)));
                         input.interrupted = None;
                         Reply::Value(0)
                     }
@@ -291,6 +334,7 @@ impl<Backend: Output> IoComponent for Console<Backend> {
             .is_some_and(|(owner, _)| owner.session == session)
         {
             input.foreground = None;
+            input.interrupted_group = None;
         }
         Ok(())
     }
@@ -361,10 +405,18 @@ pub(crate) fn serve(
                 Ok(count) => {
                     for byte in &buffer[..count] {
                         let interrupt = pump.borrow_mut().receive(*byte);
-                        if let Some(pid) = interrupt
-                            && hunde::terminal::interrupt(pid).is_ok()
-                        {
-                            pump.borrow_mut().interrupted = Some(pid);
+                        match interrupt {
+                            Some(Foreground::Process(pid))
+                                if hunde::terminal::interrupt(pid).is_ok() =>
+                            {
+                                pump.borrow_mut().interrupted = Some(pid);
+                            }
+                            Some(Foreground::Group(group))
+                                if hunde::terminal::interrupt_group(group).is_ok() =>
+                            {
+                                pump.borrow_mut().interrupted_group = Some(group);
+                            }
+                            _ => {}
                         }
                     }
                 }

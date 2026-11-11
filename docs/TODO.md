@@ -6,6 +6,10 @@ System (level 2) -> Feature (level 3) -> Supporting features or architecture
 (level 4). Unchecked items are outstanding; record unresolved design choices
 explicitly. Entries are not authorization to start implementation.
 
+Intermittent runtime failures and their investigation histories live in
+[Intermittent issues](INTERMITTENT_ISSUES.md), rather than being duplicated in
+feature checklists. A passing retry does not close an issue.
+
 ## POSIX Compatibility
 
 ### Bash Milestone
@@ -262,10 +266,15 @@ only to advance the Bash build.
 - [x] Complete process-group selection, stopped and continued child events, and
   interruption by delivered signals for `waitpid`.
 - [ ] Implement the required `wait3` behavior.
-- [ ] Complete effective group queries and parent/child lifecycle state needed
-  by Bash, including reparenting children when their recorded parent exits.
-  - [x] Add `getpid` and kernel-backed `getppid`. Processes retain the parent PID
-    assigned at creation so the query does not dereference a departed parent.
+- [ ] Complete effective group queries needed by Bash.
+  - [x] Detach live children atomically when their parent exits, preventing a
+    dangling parent pointer. The parent tracks published children directly;
+    publication, child exit, and parent exit update the list under the scheduler
+    lock. Children remain parentless; no parent-directed signal or child event
+    is delivered on their later exit. See
+    [Fork and copy-on-write](architecture/kernel/fork.md).
+  - [x] Add `getpid` and kernel-backed `getppid`. The parent PID is cleared when
+    the parent exits, so the query reports zero without dereferencing it.
   - [x] Back `getuid`, `getgid`, `geteuid`, and `getegid` with the kernel's
     current process credentials. Real and effective IDs are identical in the
     current single-identity model; `setuid` and `setgid` accept only unchanged
@@ -376,8 +385,8 @@ only to advance the Bash build.
     in the terminal input/output services, and implement window-size control.
 - [x] Implement process groups and sessions with `setpgid`, `getpgrp`, `setsid`,
   `killpg`, and group-aware parent/child lifecycle rules.
-- [ ] Add controlling-terminal ownership and `tcgetpgrp`/`tcsetpgrp`, including
-  foreground and background access checks.
+- [ ] Complete controlling-terminal ownership and foreground/background access
+  checks. Initial `tcgetpgrp`/`tcsetpgrp` use authenticated terminal handles.
 - [ ] Implement proper VT behavior in the framebuffer `video_term` service.
   - [ ] Scroll displayed rows upward when output reaches the bottom instead of
     clearing the screen and moving the cursor to the top.
@@ -398,9 +407,10 @@ only to advance the Bash build.
   environment propagation, scripts, external commands, exit status, and cleanup.
 - [ ] Test redirection, pipelines, command substitution, here-documents, Ctrl-C,
   stopped and resumed jobs, foreground/background jobs, and clean shell exit.
-  - [ ] Fix the foreground `cat` Ctrl-C timeout reproduced by the full-system
-    command smoke test on both AArch64 and RISC-V with the C root provider.
-    Hosted-root validation must not attribute this control failure to Rust EXT2.
+  - [x] Fix foreground `cat` and interactive Bash Ctrl-C in the AArch64 and
+    RISC-V full-system command smoke tests. Terminal-generated SIGINT uses the
+    I/O host's restricted capability and interrupts the next foreground read.
+    See `docs/architecture/userspace/io-system.md`.
   - [x] Extend memfs open-description inheritance for redirected external
     commands. Hosted Rust memfs uses authenticated grants sharing open
     descriptions and offsets across fork/exec. See
@@ -495,7 +505,38 @@ multi-process service graph. See the
     recovery or enabling automatic driver-host restart.
 - [ ] Implement a network-interface driver from scratch as a Rust Wuff in the
   driver host. The unused C GENET startup stub and its parser were removed;
-  target hardware and the packet interface remain open design questions.
+  VirtIO-net is the first QEMU NIC; physical Ethernet/Wi-Fi hardware remains open.
+  - [x] Evaluate smoltcp against the current Rust runtime. A pinned, allocation-free
+    probe passed native Ethernet/ARP/TCP/UDP, retransmission, and backpressure
+    tests and built for both targets, before the integrated fixture below.
+    See [network stack evaluation](architecture/userspace/network-stack-evaluation.md).
+  - [x] Integrate pinned smoltcp in a persistent, safe in-memory fixture. Six
+    native tests and AArch64/RISC-V QEMU smoke cover bounded queues, ARP,
+    TCP/UDP, lost-SYN retransmission using virtual deadlines, and cleanup.
+    `/usr/local/bin/network_probe` uses Rust startup with the existing C CRT and
+    is installed on the root filesystem, not in the bootstrap archive. No NIC or
+    application network sockets are provided by this fixture. See
+    [repository fixture](architecture/userspace/network-stack-evaluation.md#repository-fixture).
+  - [x] Build application TCP localhost as a Rust `network.wuff` inside the
+    I/O host, using generic component deadlines and existing authenticated
+    stream operations/directional buffers. Preserve local `socket://` streams.
+    See [localhost networking](architecture/userspace/localhost.md).
+  - [x] Add a standard packet Channel client/server in `hunde`, a per-interface
+    smoltcp adapter, and a manifest-selected dummy Rust Wuff in the driver host.
+    The dummy exposes two cable-connected ports; frames use directional
+    `hunde-puffer` leases, not inline messages. See
+    [packet drivers](architecture/userspace/packet-drivers.md).
+  - [x] Finish acceptance for IRQ-driven `virtio_net.wuff`, sharing split rings, MMIO setup, and IRQ
+    acknowledgement with existing VirtIO drivers. Use an isolated external
+    smoltcp peer to exercise ARP, ICMP, TCP/UDP, loss/retry, cleanup, and shutdown.
+    See [VirtIO Ethernet](architecture/userspace/virtio-net.md).
+    Implementation/native/AArch64/RISC-V acceptance pass. NIC fixtures omit auxiliary
+    test disks/mounts while retaining root, boot configuration, and keyboard;
+    normal storage regressions retain the original disks/mounts.
+  - [ ] Agree UDP datagram semantics and external interface/address/routing policy
+    before application network integration. Entropy/sequence policy,
+    DNS/address configuration, POSIX sockets, half-close/readiness, and socket
+    inheritance remain open or deferred; localhost does not implement them.
 - [ ] Move remaining display and other hardware-facing drivers into the host
   as required by current hardware targets.
   UART receive now runs as a Rust `uart_rx.wuff` in the driver host on serial-console
@@ -525,19 +566,8 @@ multi-process service graph. See the
   executables are replaced by Rust Wuffs; other driver compatibility executables remain.
 - [ ] Define host crash cleanup for device claims, IRQ routes, DMA, and requests
   before relying on automatic driver-host restart.
-- [ ] Investigate the RISC-V interrupt-manager instruction abort observed during
-  hosted sysinfo acceptance: `hund-unterbrict` reported PC zero during a root
-  filesystem copy, followed by failed UART IRQ subscriptions, repeated UART
-  restarts, and kernel heap exhaustion. Establish
-  the failing call path before changing IRQ handling or restart policy; the cause
-  and relationship to the sysinfo migration are not established. The fault
-  logger now preserves full-width PC, fault address, syndrome, and exception code,
-  with a regression test covering nonzero upper bits. The original temporary
-  trace file is no longer present; the recorded fault details remain above. The
-  full failing PC and call path still need capture. Twenty debugger-backed RISC-V boots and
-  the original C-host comparison completed without reproducing the fault. The
-  user explicitly agreed to resume driver migration on 27 October 2026 while
-  this failure remains unresolved; passing retries do not close this item.
+- [ ] Resolve the deferred RISC-V interrupt-manager abort; evidence and remaining
+  capture requirements are centralized in [INT-002](INTERMITTENT_ISSUES.md#int-002).
 
 #### `hunde-io-host`
 
@@ -663,30 +693,11 @@ multi-process service graph. See the
   I/O smoke passes on both architectures after the exit-lifetime fix below.
   See [process registry and procfs](architecture/userspace/process-registry-and-procfs.md).
 - [x] Fix the active-page-table lifetime bug exposed by intermittent RISC-V
-  full-system timeouts and repeat hosted-I/O acceptance. Before the fix, a repeated
-  run stops after echoing only `pri` from the next redirection command, before
-  the command is fully entered. An earlier run stalled in a builtin pipeline.
-  During procfs migration, another run completed every process-accounting leaf
-  and inherited snapshot read, then stalled in the first external multi-stage
-  pipeline. This is an observation, not proof of a shared root cause.
-  After fixing trace-buffer mappings, one run completed procfs and the small
-  pipelines but stalled in the 70,000-byte builtin transfer. A fresh retry
-  stopped after echoing only `exe` from the inheritance command, before it
-  executed. The focused procfs acceptance case passes on both architectures;
-  the combined smoke remains enabled with unchanged input and timeouts.
-  A debugger capture during a subsequent login stall found a CPU in exit
-  cleanup/preemption with `satp` still referencing a root lacking the kernel
-  mapping. That CPU repeatedly faulted fetching the trap vector while holding
-  the scheduler lock; the other three CPUs spun on that lock. Exit previously
-  freed the process page tables before switching away from them. Exit now
-  calls an architecture-specific active-root detach before freeing user memory
-  or tables, with hosted regression coverage for active and non-current exits.
+  full-system timeouts and repeat hosted-I/O acceptance. Exit detaches the active
+  root before freeing user memory or tables, with active/non-current regressions.
   See [address-space detachment](architecture/kernel/fork.md#address-space-detachment-on-exit).
-  The complete hosted-I/O smoke passes six consecutive RISC-V runs, including
-  the 70,000-byte pipe transfer, and passes on AArch64. Input and timeouts are
-  unchanged. Scheduler, process, and CPU suites pass 237 tests. This fixes the
-  captured exit-lifetime defect; any future stalls still need their own runtime
-  evidence rather than assuming the same cause or increasing timeouts.
+  Detailed evidence, validation, and the limits of attributing earlier console
+  and pipe stalls are retained in [Intermittent issues](INTERMITTENT_ISSUES.md#int-004).
 - [x] Start the safe Rust EXT2 migration with a checked volume reader and a
   shared `hunde::block` native adapter. Cover disk geometry, paths, directory
   records, direct/single/double-indirect and sparse reads, device failures,
@@ -810,11 +821,9 @@ multi-process service graph. See the
   and concurrent EXT2/socket/pipe smoke coverage check progress, not bounded
   latency. See [native wait ownership](architecture/userspace/rust-userspace.md#one-scheduler-multiple-fibres).
 - [x] Fix intermittent RISC-V disk-operation stalls from lost PLIC enable-word
-  updates during concurrent kernel masking and userspace rearming. Keep context
-  enables kernel-owned; mask/rearm through per-IRQ priorities. Supply the
-  unshifted priority-page base on every physical hart, without mapping enable
-  words into the manager. Register/registration regressions and 100-cycle live
-  mkdir/list/remove acceptance cover both architectures. See
+  updates during concurrent masking/rearming. Context enables remain kernel-owned;
+  masking/rearming uses per-IRQ priorities. See the
+  [resolved defect record](INTERMITTENT_ISSUES.md#lost-plic-enable-word-updates) and
   [interrupt acknowledgement flow](architecture/userspace/interrupt-service.md#interrupt-and-acknowledgement-flow).
 - [x] Move bootstrap EXT2 `/boot/config` into the host only after early host
   startup can load bootstrap components without depending on that mount.
@@ -1043,6 +1052,77 @@ multi-process service graph. See the
   final permissions, and loaded execution on AArch64 and RISC-V.
 
 ## Process Management
+
+### Userspace Threads
+
+Status: kernel thread creation, current-thread exit, and join are implemented
+for siblings on one CPU; process-owned resource groups and the initial thread's
+execution, scheduling, wait, and signal-handler fields are separated. CPU run
+queues, context switches, yields, and exception context saves identify the
+embedded thread. Syscall handlers receive the caller thread alongside its
+owning process. Parked continuations, keyed unpark, queue notifications and
+timeouts, exec-load polling, service events, and child events target the
+matching thread; admission, preferred and speculative policy remain
+process-based. Process-owned membership tracks all threads, and
+multithreaded `fork` and overlay `exec` are rejected before image mutation.
+Process exit now blocks new dispatch and waits for remote CPUs to leave its
+address space before reclamation; full-system sibling handoff validation remains.
+The raw C API uses kernel-owned stacks and a userspace start trampoline, but
+no parallel host runtime is implemented. See
+[Userspace threads](architecture/kernel/threads.md). The agreed
+direction is to establish threads before attempting a NetBSD rump port, while
+keeping host fibre parallelism as a separate, validated follow-on change.
+
+#### Kernel execution model
+
+- [ ] Split process-owned identity, address space, resources, and lifecycle from
+  thread-owned execution context, stack, scheduling, waits, signal mask, and
+  handler frames without changing one-thread process behavior.
+- [x] Define process-local, monotonic thread IDs and a kernel-owned stack ABI;
+  implement creation, current-thread exit, and join with kernel tests and
+  AArch64/RISC-V QEMU smoke probes. See [Userspace threads](architecture/kernel/threads.md).
+- [ ] Establish process-level scheduling fairness and validate remote-CPU exit
+  quiescence with concurrently running siblings in AArch64 and RISC-V QEMU.
+- [ ] Release the embedded initial thread's execution resources after join once
+  process helpers no longer require its saved context.
+- [x] Implement process-private atomic compare-and-park/wake with distinct
+  changed-value, timeout, and interruption results, plus a userspace mutex.
+  Kernel/native tests and AArch64/RISC-V QEMU cover contention, wake-before-wait,
+  signal interruption, and exit cleanup. Threads remain on one CPU; libc locking
+  and parallel execution are separate work. See
+  [atomic waits](architecture/kernel/threads.md#process-private-atomic-waits).
+- [ ] Include a bounded, changeable diagnostic name in the initial thread API;
+  keep it distinct from process identity and Channel authentication.
+- [ ] Define and implement multithreaded signal routing, fork, exec, and process
+  exit; until complete, reject unsupported multithreaded fork/exec before
+  mutating the process.
+
+#### Userspace runtime
+
+- [ ] Add a safe `hunde::thread` API for thread creation, exit, and join over the
+  kernel syscalls, keeping raw ABI bindings and unsafe operations inside
+  `hunde`. Validate Rust thread startup, returned values, and cleanup under
+  AArch64 and RISC-V QEMU.
+- [ ] Provide HundeOS platform support for Rust's standard library so programs
+  can use `std::thread::spawn` and join through the standard API. This requires
+  synchronization and thread-local runtime support beyond the `no_std`
+  `hunde::thread` wrapper; the target and standard-library integration approach
+  remains an open design question.
+- [x] Provide per-thread `errno`, Newlib reentrancy state, architecture
+  thread-pointer switching, and static executable ELF TLS initialization and
+  cleanup. See [Userspace threads](architecture/kernel/threads.md).
+- [ ] Support compiler TLS in loaded Wuff images, including loader layout and
+  relocations, before using such images for rump or parallel hosts. Wuffs
+  continue to reject TLS metadata until that support is implemented.
+- [x] Serialize libc allocation using `UserMutex`, including compound allocator
+  operations and the fork snapshot boundary, without modifying vendored Newlib.
+  See [Userspace threads](architecture/kernel/threads.md#libc-allocation).
+- [ ] Make shared native I/O clients safe for concurrent threads; preserve the
+  current single-threaded host behavior until validated.
+- [ ] Validate one fibre scheduler per host thread and explicit cross-thread
+  work transfer before enabling parallel host execution.
+- [ ] Re-evaluate NetBSD rump's host-thread and blocking-lock requirements
+  against the implemented runtime before porting its network stack.
 
 ### Event-Driven Realtime Services
 

@@ -4,6 +4,10 @@ BString ParkReason__to_string(ParkReason reason)
 {
     switch (reason)
     {
+    case PARK_WAIT_THREAD:
+        return bstr("PARK_WAIT_THREAD");
+    case PARK_WAIT_ATOMIC:
+        return bstr("PARK_WAIT_ATOMIC");
     case PARK_WAIT_CHILD:
         return bstr("PARK_WAIT_CHILD");
     case PARK_WAIT_IO:

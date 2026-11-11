@@ -23,7 +23,7 @@ void setUp(void)
     first_peer = dummy_process(20, 0, PROC_STATE_READY);
     second_peer = dummy_process(30, 0, PROC_STATE_READY);
     unrelated = dummy_process(40, 0, PROC_STATE_READY);
-    owner->process_class = PROCESS_CLASS_SERVICE;
+    owner->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(owner);
     Scheduler__schedule_on_cpu(kernel->scheduler, owner, 0);
     Scheduler__schedule_on_cpu(kernel->scheduler, first_peer, 0);
@@ -51,8 +51,8 @@ static Address allocate_shared_page(void)
 
 static bool mapped(ProcessPtr process, Address address)
 {
-    return check_address_mapped(ProcessPageTable__root_table(&process->page_table), address, true, true, false,
-                                MEM_SHARED_PAGE_SIZE);
+    return check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table), address, true, true,
+                                false, MEM_SHARED_PAGE_SIZE);
 }
 
 static void release_page(Address address)
@@ -242,12 +242,12 @@ void test_shared_page_syscalls_allocate_and_release(void)
 {
     Optional(ProcessPtr) caller = Some(ProcessPtr, owner);
     match_result(
-        Mem__handler(kernel, &caller, MEM_ALLOC_SHARED_PAGE, first_peer->pid, second_peer->pid, 0, 0),
+        Mem__handler(kernel, &caller, MEM_ALLOC_SHARED_PAGE, first_peer->pid, second_peer->pid, 0, 0, &None(ThreadPtr)),
         success(address)
         {
             TEST_ASSERT_TRUE(mapped(first_peer, address));
             match_result(
-                Mem__handler(kernel, &caller, MEM_RELEASE_SHARED_PAGE, address, 0, 0, 0),
+                Mem__handler(kernel, &caller, MEM_RELEASE_SHARED_PAGE, address, 0, 0, 0, &None(ThreadPtr)),
                 success(status)
                 {
                     TEST_ASSERT_EQUAL(MEM_OK, status);

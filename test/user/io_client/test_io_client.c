@@ -105,6 +105,8 @@ static Optional(IOReply)
         break;
     case IO_REQUEST_CLOSE:
     case IO_REQUEST_SET_FOREGROUND_PROCESS:
+    case IO_REQUEST_GET_FOREGROUND_GROUP:
+    case IO_REQUEST_SET_FOREGROUND_GROUP:
     case IO_REQUEST_SET_TERMINAL_ATTRIBUTES:
     case IO_REQUEST_LINK:
         break;
@@ -602,6 +604,13 @@ void test_client_transports_control_seek_and_file_change_requests(void)
     TEST_ASSERT_EQUAL(IO_OK, IOClient__set_foreground_process(first, 55));
     TEST_ASSERT_EQUAL(IO_REQUEST_SET_FOREGROUND_PROCESS, last_request.operation);
     TEST_ASSERT_EQUAL_UINT64(55, last_request.foreground_pid);
+
+    IOReply group = IOClient__get_foreground_group(first);
+    TEST_ASSERT_EQUAL(IO_OK, group.status);
+    TEST_ASSERT_EQUAL(IO_REQUEST_GET_FOREGROUND_GROUP, last_request.operation);
+    TEST_ASSERT_EQUAL(IO_OK, IOClient__set_foreground_group(first, 55));
+    TEST_ASSERT_EQUAL(IO_REQUEST_SET_FOREGROUND_GROUP, last_request.operation);
+    TEST_ASSERT_EQUAL_UINT64(55, last_request.offset);
 
     IOTerminalAttributesResult terminal = IOClient__get_terminal_attributes(first);
     TEST_ASSERT_EQUAL(IO_OK, terminal.status);

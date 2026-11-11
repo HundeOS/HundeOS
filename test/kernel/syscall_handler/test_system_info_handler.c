@@ -47,7 +47,8 @@ void test_system_info_returns_settings_to_hund_process(void)
     *settings = SystemSettings__new(false);
 
     match_result(
-        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0),
+        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0,
+                            &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SYSTEM_INFO_OK, code);
@@ -68,7 +69,8 @@ void test_system_info_rejects_non_hund_process_without_overwriting_output(void)
     *settings = SystemSettings__new(false);
 
     match_result(
-        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0),
+        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0,
+                            &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -80,7 +82,8 @@ void test_system_info_rejects_non_hund_process_without_overwriting_output(void)
 
     process->user_id = PROCESS_USER_ROOT;
     match_result(
-        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0),
+        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0,
+                            &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -99,7 +102,8 @@ void test_system_info_rejects_missing_caller_and_output(void)
     *settings = SystemSettings__new(false);
 
     match_result(
-        SystemInfo__handler(&kernel, &None(ProcessPtr), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0),
+        SystemInfo__handler(&kernel, &None(ProcessPtr), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0,
+                            &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -107,7 +111,8 @@ void test_system_info_rejects_missing_caller_and_output(void)
         }
     );
     match_result(
-        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, 0, 0, 0, 0),
+        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, 0, 0, 0, 0,
+                            &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -128,7 +133,8 @@ void test_system_info_reports_unavailable_kernel_state(void)
     *settings = SystemSettings__new(false);
 
     match_result(
-        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0),
+        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_SETTINGS, output.user, 0, 0, 0,
+                            &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -149,7 +155,7 @@ void test_system_info_copies_kernel_trace_to_valid_hund_memory(void)
 
     match_result(
         SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_KERNEL_TRACE, output.user, PAGE_SIZE,
-                            0, 0),
+                            0, 0, &None(ThreadPtr)),
         success(size)
         {
             static const char marker[] = "system-info-trace-marker";
@@ -169,7 +175,8 @@ void test_system_info_rejects_unmapped_kernel_trace_destination(void)
     process->user_id = PROCESS_USER_HUND;
 
     match_result(
-        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_KERNEL_TRACE, 0x1234, 64, 0, 0),
+        SystemInfo__handler(&kernel, &Some(ProcessPtr, process), SYSTEM_INFO_READ_KERNEL_TRACE, 0x1234, 64, 0, 0,
+                            &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {

@@ -265,14 +265,14 @@ impl VirtioDeviceConfiguration {
 }
 
 #[cfg(feature = "alloc")]
-pub struct BlockDriverConfiguration {
+pub struct VirtioEndpointConfiguration {
     pub hardware: VirtioMmio,
     pub slot: u64,
     pub path: alloc::vec::Vec<u8>,
 }
 
 #[cfg(feature = "alloc")]
-impl BlockDriverConfiguration {
+impl VirtioEndpointConfiguration {
     pub fn new(hardware: VirtioMmio, slot: u64, path: &[u8]) -> Result<Self, IoError> {
         if slot >= hardware.slot_count || path.is_empty() || path.len() > 255 {
             return Err(IoError(crate::protocol::SERVICE_INVALID_BUFFER));
@@ -506,15 +506,15 @@ mod tests {
             slot_count: 64,
             first_irq: 32,
         };
-        let configuration = BlockDriverConfiguration::new(hardware, 5, b"/dev/virtio1").unwrap();
+        let configuration = VirtioEndpointConfiguration::new(hardware, 5, b"/dev/virtio1").unwrap();
         let wire = configuration.wire_bytes();
-        let parsed = BlockDriverConfiguration::from_wire_bytes(&wire).unwrap();
+        let parsed = VirtioEndpointConfiguration::from_wire_bytes(&wire).unwrap();
         assert_eq!(parsed.hardware, hardware);
         assert_eq!(parsed.slot, 5);
         assert_eq!(parsed.path, b"/dev/virtio1");
-        assert!(BlockDriverConfiguration::from_wire_bytes(&wire[..wire.len() - 1]).is_err());
-        assert!(BlockDriverConfiguration::from_wire_bytes(&wire[..47]).is_err());
-        assert!(BlockDriverConfiguration::new(hardware, 64, b"/dev/virtio1").is_err());
+        assert!(VirtioEndpointConfiguration::from_wire_bytes(&wire[..wire.len() - 1]).is_err());
+        assert!(VirtioEndpointConfiguration::from_wire_bytes(&wire[..47]).is_err());
+        assert!(VirtioEndpointConfiguration::new(hardware, 64, b"/dev/virtio1").is_err());
     }
 
     #[test]

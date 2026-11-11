@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "../../common_includes/wuff.h"
+#include "../../common_includes/syscalls/process.h"
 #include "../address.h"
 #include "../types/fixed_array.h"
 
@@ -208,6 +209,7 @@ ResultDef(Elf);
 Result(Elf) Elf__validate(ConstElfPtr self);
 ResultDef(ElfImageKind);
 Result(ElfImageKind) Elf__image_kind(ConstElfPtr self);
+Result(ThreadLocalImage) Elf__thread_local_image(ConstElfPtr self);
 ResultDef(ElfPtr);
 OptionalDef(Elf);
 OptionalDef(ElfPtr);

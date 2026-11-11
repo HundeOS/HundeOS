@@ -45,6 +45,17 @@ pub(crate) struct Dispatch {
 }
 
 impl crate::component::IoComponent for Dispatch {
+    fn advance(&mut self, now_usec: u64) -> crate::component::Schedule {
+        let schedule =
+            unsafe { self.descriptor.advance.unwrap()(self.descriptor.context, now_usec) };
+        if schedule.worked > 1 {
+            crate::runtime::fatal(b"Invalid component schedule");
+        }
+        crate::component::Schedule::new(
+            schedule.worked != 0,
+            (schedule.deadline_usec != u64::MAX).then_some(schedule.deadline_usec),
+        )
+    }
     fn execute(
         &mut self,
         request: crate::io::Request<'_>,
@@ -336,6 +347,9 @@ pub struct LoadedComponent {
 }
 
 impl crate::component::IoComponent for LoadedComponent {
+    fn advance(&mut self, now_usec: u64) -> crate::component::Schedule {
+        crate::component::IoComponent::advance(&mut self.dispatch, now_usec)
+    }
     fn execute(
         &mut self,
         request: crate::io::Request<'_>,
@@ -396,7 +410,7 @@ impl LoadedComponent {
     unsafe fn load_path(path: &[u8]) -> Result<Self, IoError> {
         let operations = crate::runtime::operations()?;
         let module = Module::load(path)?;
-        let symbol = module.export(b"hunde_io_component_entry_v6")?;
+        let symbol = module.export(b"hunde_io_component_entry_v7")?;
         let entry: unsafe extern "C" fn(*const HostOperations) -> LoadResult =
             unsafe { core::mem::transmute(symbol) };
         let dispatch = Dispatch::new(unsafe { entry(operations) })?;
@@ -538,8 +552,13 @@ mod tests {
                 execute: Some(execute),
                 disconnect: Some(disconnect),
                 dispose: Some(dispose),
+                advance: Some(advance),
             }
         }
+    }
+
+    unsafe extern "C" fn advance(_context: *mut c_void, _now_usec: u64) -> crate::abi::RawSchedule {
+        crate::component::Schedule::new(true, Some(1234)).into()
     }
 
     unsafe extern "C" fn execute(context: *mut c_void, request: *const RawRequest) -> Completion {
@@ -588,8 +607,13 @@ mod tests {
 
     #[test]
     fn host_dispatch_preserves_identity_buffers_and_completion_tags() {
+        use crate::component::IoComponent;
         let mut state = FakeComponent::new();
         let mut dispatch = Dispatch::new(LoadResult::success(state.descriptor())).unwrap();
+        assert_eq!(
+            dispatch.advance(1000),
+            crate::component::Schedule::new(true, Some(1234))
+        );
         let context = (&mut dispatch as *mut Dispatch).cast();
         let mut target = 0;
         let input = request(&mut target);
@@ -632,6 +656,12 @@ mod tests {
         let mut state = FakeComponent::new();
         let mut descriptor = state.descriptor();
         descriptor.execute = None;
+        assert!(matches!(
+            Dispatch::new(LoadResult::success(descriptor)),
+            Err(IoError(-1))
+        ));
+        let mut descriptor = state.descriptor();
+        descriptor.advance = None;
         assert!(matches!(
             Dispatch::new(LoadResult::success(descriptor)),
             Err(IoError(-1))

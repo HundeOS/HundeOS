@@ -4,11 +4,11 @@
 
 #include "../../../arch/riscv64/mmio_load.h"
 
-static ProcessContext context;
+static ThreadContext context;
 
 void setUp(void)
 {
-    context = (ProcessContext){0};
+    context = (ThreadContext){0};
 }
 
 void tearDown(void)

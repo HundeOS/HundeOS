@@ -8,7 +8,8 @@ make compile-commands
 
 This uses the project's pinned compiledb dependency through uv and checked,
 forced Make dry runs. It does not compile, configure/install Newlib, regenerate
-Bash configuration, launch QEMU, or clean build artifacts. The first invocation
+Bash configuration, launch QEMU, or clean build artifacts. It generates Bash's
+`pathnames.h` from the configured templates before capture. The first invocation
 requires network access to install the Python tool dependencies.
 
 Bash commands come from its existing configured Makefiles for each architecture.

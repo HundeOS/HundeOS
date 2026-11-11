@@ -1,0 +1,18 @@
+[package]
+name = "hunde-net-dummy"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "net-dummy-component"
+path = "src/entry.rs"
+required-features = ["component"]
+
+[features]
+component = []
+
+[dependencies]
+hunde = { path = "../../lib/hunde" }
+
+[lints]
+workspace = true

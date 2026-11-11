@@ -1,5 +1,6 @@
 #include "../../../user.h"
 #include "../../sys/process.h"
+#include "../../sys/thread_local.h"
 #include "../../sys/io.h"
 #include "../../newlib/posix_io.h"
 #include "../../newlib/runtime.h"
@@ -9,6 +10,10 @@ extern int main(int argc, char ** argv, char ** envp);
 void _start(int argc, char ** argv, char ** envp, uint64_t pid, IOHandle input, IOHandle output, IOHandle error,
             ConstExecPayloadPtr exec_payload)
 {
+    if (ThreadLocal__initialize() != THREAD_OPERATION_OK)
+    {
+        exit(127);
+    }
     process_set_startup_pid(pid);
     IO__set_startup_stdio(input, output, error);
     LibC__set_environment(envp);

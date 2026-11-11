@@ -6,7 +6,10 @@ userspace I/O API; the kernel is not involved in normal file operations.
 
 The allocator source in `nano-mallocr.c` is vendored from newlib
 `4.6.0.20260123` with its upstream copyright notice intact. `malloc.c` is the
-local build wrapper selecting its entry points.
+local adapter serializing its public entry points with a process-private
+`UserMutex`. `allocator_core.c` selects and privately renames the upstream
+entry points, so nested calls from `calloc`, `realloc`, and `memalign` stay
+inside one lock without requiring recursion or changes to the vendored source.
 The wrapper also enables upstream `memalign`; the Rust host allocation adapter
 uses it to honor Rust `Layout` alignment while retaining ordinary `free`.
 
@@ -21,9 +24,13 @@ Newlib's complete libc or advertises headers for unsupported operating-system
 interfaces.
 
 This directory remains the HundeOS libc and POSIX adaptation layer. `errno.c`
-supplies the shared `__errno` entry point and the minimal `_impure_ptr` storage
-needed by the selected Newlib conversion routines. Newlib's `impure.o` and its
-stdio dependencies are deliberately not selected.
+supplies `__getreent` and `__errno` over the current thread's runtime allocation.
+Newlib is built with multithread support and dynamic reentrancy so the selected
+conversion routines use that same per-thread record. `_impure_ptr` remains
+bootstrap storage only. Newlib's `impure.o` and its stdio dependencies are
+deliberately not selected. Allocation is serialized; descriptor and native I/O
+bookkeeping are not yet thread-safe. See [Userspace threads](../../../docs/architecture/kernel/threads.md)
+for static TLS support and the remaining loaded-image limitation.
 
 The compatibility surface grows from concrete port requirements. The pinned
 OpenBSD `cat`, `ln`, `ls`, `mkdir`, `mv`, and `rm` sources are its current

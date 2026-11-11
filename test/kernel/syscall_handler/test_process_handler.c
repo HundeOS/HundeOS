@@ -12,7 +12,7 @@
 #include "../stubs/cpu.h"
 #include "../stubs/panic.h"
 #include "../stubs/system.h"
-#include "../stubs/process_context_layout.h"
+#include "../stubs/thread_context_layout.h"
 #include "../stubs/kalloc.h"
 #include "../stubs/page_table.h"
 
@@ -62,24 +62,59 @@ void tearDown(void)
     TEST_ASSERT_FALSE(panic_occurred());
 }
 
+void test_thread_local_image_handler_copies_metadata_to_validated_mapping(void)
+{
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
+    process->image.thread_local_image = ThreadLocalImage__new(0x4000, 16, 64, 32);
+    UserAddress output = unwrap_result(Process__alloc_user_pages(process, sizeof(ThreadLocalImage)), NULL_USER_ADDRESS);
+    match_result(
+        ThreadLocalImage__handler(kernel, &Some(ProcessPtr, process), output.virtual_addr, 0, 0, 0, 0,
+                                  &Some(ThreadPtr, &process->thread)),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(THREAD_OPERATION_OK, code);
+        },
+        error_test_fail()
+    );
+    ThreadLocalImagePtr copied = k_v_ptr(output, ThreadLocalImage);
+    TEST_ASSERT_EQUAL_HEX64(0x4000, copied->address);
+    TEST_ASSERT_EQUAL_UINT64(16, copied->initialized_size);
+    TEST_ASSERT_EQUAL_UINT64(64, copied->size);
+    TEST_ASSERT_EQUAL_UINT64(32, copied->alignment);
+}
+
+void test_thread_local_image_handler_rejects_unmapped_output(void)
+{
+    ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
+    match_result(
+        ThreadLocalImage__handler(kernel, &Some(ProcessPtr, process), 1, 0, 0, 0, 0,
+                                  &Some(ThreadPtr, &process->thread)),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(THREAD_OPERATION_INVALID, code);
+        }
+    );
+}
+
 void test_process_registry_map_handler_maps_once_and_returns_userspace_address(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_RUNNING);
 
     match_result(
-        ProcessRegistryMap__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        ProcessRegistryMap__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL_UINT64(PROCESS_REGISTRY_VADDR, result);
         },
         error_test_fail()
     );
-    TEST_ASSERT_TRUE(process->process_registry_mapped);
-    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), PROCESS_REGISTRY_VADDR,
-                                          true, false, false, PROCESS_REGISTRY_SIZE));
+    TEST_ASSERT_TRUE(process->address_space.process_registry_mapped);
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                          PROCESS_REGISTRY_VADDR, true, false, false, PROCESS_REGISTRY_SIZE));
 
     match_result(
-        ProcessRegistryMap__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        ProcessRegistryMap__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL_UINT64(PROCESS_REGISTRY_VADDR, result);
@@ -91,7 +126,7 @@ void test_process_registry_map_handler_maps_once_and_returns_userspace_address(v
 void test_process_registry_map_handler_rejects_missing_caller(void)
 {
     match_result(
-        ProcessRegistryMap__handler(kernel, None(ProcessPtr), 0, 0, 0, 0, 0),
+        ProcessRegistryMap__handler(kernel, None(ProcessPtr), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -105,7 +140,7 @@ void test_process_idle_wait_handler_yields_and_waits_for_idle_process(void)
     ProcessPtr idle_process = unwrap_optional(Scheduler__idle_process(kernel->scheduler, cpu), (ProcessPtr){});
 
     match_result(
-        ProcessIdleWait__handler(kernel, Some(ProcessPtr, idle_process), 0, 0, 0, 0, 0),
+        ProcessIdleWait__handler(kernel, Some(ProcessPtr, idle_process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_IDLE_WAIT_OK, result);
@@ -114,7 +149,7 @@ void test_process_idle_wait_handler_yields_and_waits_for_idle_process(void)
     );
 
     TEST_ASSERT_EQUAL_UINT64(1, CPUStub__wait_count());
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, idle_process->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, idle_process->thread.state);
 }
 
 void test_process_idle_wait_handler_rejects_non_idle_process(void)
@@ -122,7 +157,7 @@ void test_process_idle_wait_handler_rejects_non_idle_process(void)
     ProcessPtr process = dummy_process(71, cpu, PROC_STATE_RUNNING);
 
     match_result(
-        ProcessIdleWait__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        ProcessIdleWait__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -137,23 +172,23 @@ void test_process_list_handler_returns_scheduled_processes(void)
 {
     ProcessPtr init = dummy_process(1, cpu, PROC_STATE_READY);
     ProcessPtr driver = dummy_process(2, cpu, PROC_STATE_READY);
-    CPUUsage__start(&driver->cpu_usage, test_cpu_time_usec, 0);
+    CPUUsage__start(&driver->accounting.cpu_usage, test_cpu_time_usec, 0);
     test_cpu_time_usec = 10000;
-    CPUUsage__stop(&driver->cpu_usage, test_cpu_time_usec, 0);
-    driver->process_class = PROCESS_CLASS_SERVICE;
+    CPUUsage__stop(&driver->accounting.cpu_usage, test_cpu_time_usec, 0);
+    driver->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(driver);
     ProcessPtr ready_waiter = dummy_process(3, cpu, PROC_STATE_READY);
-    ready_waiter->process_class = PROCESS_CLASS_SERVICE;
+    ready_waiter->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(ready_waiter);
 
     Scheduler__schedule_on_cpu(kernel->scheduler, init, cpu);
     Scheduler__schedule_on_cpu(kernel->scheduler, driver, cpu);
     Scheduler__schedule_on_cpu(kernel->scheduler, ready_waiter, cpu);
     KernelContext kernel_context =
-        KernelContext__new(&Some(ProcessID, driver->pid), &Some(SchedulerPtr, kernel->scheduler));
+        KernelContext__new(&Some(ThreadPtr, &driver->thread), &Some(SchedulerPtr, kernel->scheduler));
     Scheduler__park(kernel->scheduler, driver, &kernel_context, &None(Continuation), PARK_WAIT_SERVICE_EVENT);
     KernelContext ready_context =
-        KernelContext__new(&Some(ProcessID, ready_waiter->pid), &Some(SchedulerPtr, kernel->scheduler));
+        KernelContext__new(&Some(ThreadPtr, &ready_waiter->thread), &Some(SchedulerPtr, kernel->scheduler));
     Scheduler__park(kernel->scheduler, ready_waiter, &ready_context, &None(Continuation), PARK_WAIT_SERVICE_READY);
 
     ProcessInfo entries[4];
@@ -163,7 +198,7 @@ void test_process_list_handler_returns_scheduled_processes(void)
     };
 
     match_result(
-        ProcessList__handler(kernel, Some(ProcessPtr, init), (Anything)&request, 0, 0, 0, 0),
+        ProcessList__handler(kernel, Some(ProcessPtr, init), (Anything)&request, 0, 0, 0, 0, &None(ThreadPtr)),
         success(count)
         {
             TEST_ASSERT_EQUAL_UINT64(4, count);
@@ -202,11 +237,11 @@ void test_process_fork_handler_publishes_complete_child_only_after_resume(void)
 {
     ProcessPtr parent = dummy_process(60, cpu, PROC_STATE_RUNNING);
     Scheduler__schedule_on_cpu(kernel->scheduler, parent, cpu);
-    parent->state = PROC_STATE_RUNNING;
+    parent->thread.state = PROC_STATE_RUNNING;
 
     ProcessID child_pid = 0;
     match_result(
-        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_PREPARE, 0, 0, 0, 0),
+        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_PREPARE, 0, 0, 0, 0, &None(ThreadPtr)),
         success(prepared_pid)
         {
             child_pid = (ProcessID)prepared_pid;
@@ -215,9 +250,11 @@ void test_process_fork_handler_publishes_complete_child_only_after_resume(void)
     );
     TEST_ASSERT_NOT_EQUAL(0, child_pid);
     TEST_ASSERT_FALSE(scheduler_contains_process(child_pid));
+    TEST_ASSERT_EQUAL(0, LiveChildren__len(&parent->live_children));
 
     match_result(
-        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_RESUME, child_pid, 0, 0, 0),
+        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_RESUME, child_pid, 0, 0, 0,
+                             &None(ThreadPtr)),
         success(resumed_pid)
         {
             TEST_ASSERT_EQUAL_UINT64(child_pid, resumed_pid);
@@ -229,7 +266,7 @@ void test_process_fork_handler_publishes_complete_child_only_after_resume(void)
         some(child)
         {
             TEST_ASSERT_EQUAL_UINT64(parent->pid, unwrap_optional(child->parent_pid, 0));
-            TEST_ASSERT_EQUAL(PROC_STATE_READY, child->state);
+            TEST_ASSERT_EQUAL(PROC_STATE_READY, child->thread.state);
             TEST_ASSERT_EQUAL_UINT64(0, Process__required_context(child)->x[0]);
         },
         none()
@@ -237,17 +274,18 @@ void test_process_fork_handler_publishes_complete_child_only_after_resume(void)
             TEST_FAIL_MESSAGE("fork child was not published");
         }
     );
+    TEST_ASSERT_EQUAL(1, LiveChildren__len(&parent->live_children));
 }
 
 void test_process_fork_handler_aborts_unpublished_child(void)
 {
     ProcessPtr parent = dummy_process(62, cpu, PROC_STATE_RUNNING);
     Scheduler__schedule_on_cpu(kernel->scheduler, parent, cpu);
-    parent->state = PROC_STATE_RUNNING;
+    parent->thread.state = PROC_STATE_RUNNING;
     ProcessID child_pid = 0;
 
     match_result(
-        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_PREPARE, 0, 0, 0, 0),
+        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_PREPARE, 0, 0, 0, 0, &None(ThreadPtr)),
         success(prepared_pid)
         {
             child_pid = (ProcessID)prepared_pid;
@@ -256,21 +294,73 @@ void test_process_fork_handler_aborts_unpublished_child(void)
     );
     TEST_ASSERT_FALSE(scheduler_contains_process(child_pid));
     match_result(
-        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_ABORT, child_pid, 0, 0, 0),
+        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_ABORT, child_pid, 0, 0, 0,
+                             &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL_UINT64(0, result);
         },
         error_test_fail()
     );
-    TEST_ASSERT_TRUE(is_nothing(parent->pending_fork_child));
+    TEST_ASSERT_EQUAL(0, PendingForkChildren__len(&parent->pending_fork_children));
     TEST_ASSERT_FALSE(scheduler_contains_process(child_pid));
+}
+
+void test_process_fork_handler_tracks_multiple_pending_children_by_pid(void)
+{
+    ProcessPtr parent = dummy_process(63, cpu, PROC_STATE_RUNNING);
+    Scheduler__schedule_on_cpu(kernel->scheduler, parent, cpu);
+    parent->thread.state = PROC_STATE_RUNNING;
+    ProcessID first_pid = 0;
+    ProcessID second_pid = 0;
+
+    match_result(
+        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_PREPARE, 0, 0, 0, 0, &None(ThreadPtr)),
+        success(pid)
+        {
+            first_pid = (ProcessID)pid;
+        },
+        error_test_fail()
+    );
+    match_result(
+        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_PREPARE, 0, 0, 0, 0, &None(ThreadPtr)),
+        success(pid)
+        {
+            second_pid = (ProcessID)pid;
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_NOT_EQUAL(first_pid, second_pid);
+    TEST_ASSERT_EQUAL(2, PendingForkChildren__len(&parent->pending_fork_children));
+    TEST_ASSERT_EQUAL(0, LiveChildren__len(&parent->live_children));
+    TEST_ASSERT_FALSE(scheduler_contains_process(first_pid));
+    TEST_ASSERT_FALSE(scheduler_contains_process(second_pid));
+
+    match_result(ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_ABORT, first_pid, 0, 0, 0,
+                                      &None(ThreadPtr)),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(1, PendingForkChildren__len(&parent->pending_fork_children));
+    match_result(
+        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_RESUME, second_pid, 0, 0, 0,
+                             &None(ThreadPtr)),
+        success(pid)
+        {
+            TEST_ASSERT_EQUAL_UINT64(second_pid, pid);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(0, PendingForkChildren__len(&parent->pending_fork_children));
+    TEST_ASSERT_EQUAL(1, LiveChildren__len(&parent->live_children));
+    TEST_ASSERT_FALSE(scheduler_contains_process(first_pid));
+    TEST_ASSERT_TRUE(scheduler_contains_process(second_pid));
 }
 
 void test_process_fork_handler_rejects_missing_caller(void)
 {
     match_result(
-        ProcessFork__handler(kernel, None(ProcessPtr), PROCESS_FORK_PREPARE, 0, 0, 0, 0),
+        ProcessFork__handler(kernel, None(ProcessPtr), PROCESS_FORK_PREPARE, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -283,13 +373,13 @@ void test_process_fork_handler_rolls_back_allocation_failure_before_publication(
 {
     ProcessPtr parent = dummy_process(61, cpu, PROC_STATE_RUNNING);
     Scheduler__schedule_on_cpu(kernel->scheduler, parent, cpu);
-    parent->state = PROC_STATE_RUNNING;
+    parent->thread.state = PROC_STATE_RUNNING;
     uint64_t process_count = Scheduler__process_count(kernel->scheduler);
     size_t frees_before = KAllocStub__free_count();
     KAllocStub__set_user_alloc_failure(true);
 
     match_result(
-        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_PREPARE, 0, 0, 0, 0),
+        ProcessFork__handler(kernel, Some(ProcessPtr, parent), PROCESS_FORK_PREPARE, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -308,17 +398,18 @@ void test_process_list_observes_child_wait_without_registry_timer_refresh(void)
     ProcessPtr child = dummy_process(41, cpu, PROC_STATE_READY);
     Scheduler__schedule_on_cpu(kernel->scheduler, shell, cpu);
     Scheduler__schedule_on_cpu(kernel->scheduler, child, cpu);
-    shell->state = PROC_STATE_RUNNING;
-    KernelContext context = KernelContext__new(&Some(ProcessID, shell->pid), &Some(SchedulerPtr, kernel->scheduler));
+    shell->thread.state = PROC_STATE_RUNNING;
+    KernelContext context =
+        KernelContext__new(&Some(ThreadPtr, &shell->thread), &Some(SchedulerPtr, kernel->scheduler));
     match_result(Scheduler__park(kernel->scheduler, shell, &context, &None(Continuation), PARK_WAIT_CHILD),
                  success_do_nothing(),
         error_test_fail()
     );
-    child->state = PROC_STATE_RUNNING;
+    child->thread.state = PROC_STATE_RUNNING;
     ProcessInfo entries[3];
     ProcessListRequest request = ProcessListRequest__new(entries, 3);
     match_result(
-        ProcessList__handler(kernel, Some(ProcessPtr, child), (Anything)&request, 0, 0, 0, 0),
+        ProcessList__handler(kernel, Some(ProcessPtr, child), (Anything)&request, 0, 0, 0, 0, &None(ThreadPtr)),
         success(count)
         {
             TEST_ASSERT_EQUAL_UINT64(3, count);
@@ -349,7 +440,7 @@ void test_process_list_handler_respects_entry_limit(void)
     };
 
     match_result(
-        ProcessList__handler(kernel, Some(ProcessPtr, first), (Anything)&request, 0, 0, 0, 0),
+        ProcessList__handler(kernel, Some(ProcessPtr, first), (Anything)&request, 0, 0, 0, 0, &None(ThreadPtr)),
         success(count)
         {
             TEST_ASSERT_EQUAL_UINT64(1, count);
@@ -365,7 +456,7 @@ void test_process_list_handler_rejects_missing_request(void)
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
 
     match_result(
-        ProcessList__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        ProcessList__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -383,7 +474,8 @@ void test_process_credentials_returns_target_identity_not_requester_identity(voi
     Scheduler__schedule(kernel->scheduler, target);
     ProcessCredentials credentials = ProcessCredentials__new(0, 0);
     match_result(
-        ProcessCredentials__handler(kernel, &Some(ProcessPtr, requester), target->pid, (Anything)&credentials, 0, 0, 0),
+        ProcessCredentials__handler(kernel, &Some(ProcessPtr, requester), target->pid, (Anything)&credentials, 0, 0, 0,
+                                    &None(ThreadPtr)),
         success(status)
         {
             TEST_ASSERT_EQUAL(PROCESS_CREDENTIALS_OK, status);
@@ -398,7 +490,8 @@ void test_process_credentials_rejects_missing_pid_and_invalid_arguments_without_
 {
     ProcessCredentials credentials = ProcessCredentials__new(123, 456);
     match_result(
-        ProcessCredentials__handler(kernel, &None(ProcessPtr), 99999, (Anything)&credentials, 0, 0, 0),
+        ProcessCredentials__handler(kernel, &None(ProcessPtr), 99999, (Anything)&credentials, 0, 0, 0,
+                                    &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -408,7 +501,7 @@ void test_process_credentials_rejects_missing_pid_and_invalid_arguments_without_
     TEST_ASSERT_EQUAL(123, credentials.user_id);
     TEST_ASSERT_EQUAL(456, credentials.group_id);
     match_result(
-        ProcessCredentials__handler(kernel, &None(ProcessPtr), 0, (Anything)&credentials, 0, 0, 0),
+        ProcessCredentials__handler(kernel, &None(ProcessPtr), 0, (Anything)&credentials, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -416,7 +509,7 @@ void test_process_credentials_rejects_missing_pid_and_invalid_arguments_without_
         }
     );
     match_result(
-        ProcessCredentials__handler(kernel, &None(ProcessPtr), 1, 0, 0, 0, 0),
+        ProcessCredentials__handler(kernel, &None(ProcessPtr), 1, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -435,11 +528,11 @@ void test_signal_handler_queues_ready_process_without_teardown(void)
 
     match_result(
         Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)target->pid, (Anything)PROCESS_SIGNAL_TERMINATE, 0,
-                        0, 0),
+                        0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
-            TEST_ASSERT_EQUAL(PROC_STATE_READY, target->state);
+            TEST_ASSERT_EQUAL(PROC_STATE_READY, target->thread.state);
             TEST_ASSERT_TRUE(Process__has_pending_signal(target));
             TEST_ASSERT_TRUE(scheduler_contains_process(target->pid));
         },
@@ -457,7 +550,7 @@ void test_signal_handler_accepts_abort_signal(void)
 
     match_result(
         Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)target->pid, (Anything)PROCESS_SIGNAL_ABORT, 0, 0,
-                        0),
+                        0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
@@ -467,16 +560,57 @@ void test_signal_handler_accepts_abort_signal(void)
     );
 }
 
+void test_terminal_signal_handler_requires_capability_and_interrupt_signal(void)
+{
+    ProcessPtr sender = dummy_process(3, cpu, PROC_STATE_READY);
+    ProcessPtr target = dummy_process(4, cpu, PROC_STATE_READY);
+    target->process_group_id = 4;
+    Process__set_identity(sender, PROCESS_USER_HUND, PROCESS_GROUP_HUND, PROCESS_CAP_NONE);
+    Process__set_root_identity(target);
+    Scheduler__schedule(kernel->scheduler, sender);
+    Scheduler__schedule(kernel->scheduler, target);
+
+    match_result(
+        Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)-4, PROCESS_SIGNAL_INTERRUPT,
+                        PROCESS_SIGNAL_ORIGIN_TERMINAL, 0, 0, &None(ThreadPtr)),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_PERMISSION_DENIED, code);
+        }
+    );
+    sender->capabilities = PROCESS_CAP_SIGNAL_TERMINAL;
+    match_result(
+        Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)-4, PROCESS_SIGNAL_KILL,
+                        PROCESS_SIGNAL_ORIGIN_TERMINAL, 0, 0, &None(ThreadPtr)),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INVALID_ARGUMENT, code);
+        }
+    );
+    match_result(
+        Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)-4, PROCESS_SIGNAL_INTERRUPT,
+                        PROCESS_SIGNAL_ORIGIN_TERMINAL, 0, 0, &None(ThreadPtr)),
+        success(result)
+        {
+            TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_TRUE(Process__has_pending_signal(target));
+}
+
 void test_signal_handler_queues_running_process_until_next_syscall_boundary(void)
 {
     ProcessPtr target = dummy_process(1, cpu, PROC_STATE_RUNNING);
 
     Scheduler__schedule_on_cpu(kernel->scheduler, target, cpu);
-    target->state = PROC_STATE_RUNNING;
+    target->thread.state = PROC_STATE_RUNNING;
 
     match_result(
-        Signal__handler(kernel, Some(ProcessPtr, target), (Anything)target->pid, (Anything)PROCESS_SIGNAL_KILL, 0, 0,
-                        0),
+        Signal__handler(kernel, Some(ProcessPtr, target), (Anything)target->pid, (Anything)PROCESS_SIGNAL_KILL, 0, 0, 0,
+                        &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
@@ -487,8 +621,8 @@ void test_signal_handler_queues_running_process_until_next_syscall_boundary(void
     );
 
     match_result(
-        SyscallDispatcher__dispatch(&kernel->syscall_dispatcher, kernel, &Some(ProcessPtr, target), PING, 0, 0, 0, 0,
-                                    0),
+        SyscallDispatcher__dispatch(&kernel->syscall_dispatcher, kernel, &Some(ThreadPtr, &target->thread), PING, 0, 0,
+                                    0, 0, 0),
         success(result)
         {
             TEST_ASSERT_EQUAL(SYSCALL_OK, result);
@@ -499,9 +633,10 @@ void test_signal_handler_queues_running_process_until_next_syscall_boundary(void
         }
     );
 
-    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_DELIVERY_TERMINATE,
-                      Scheduler__deliver_pending_signal(kernel->scheduler, target, Process__required_context(target)));
-    TEST_ASSERT_EQUAL(PROC_STATE_DEAD, target->state);
+    TEST_ASSERT_EQUAL(
+        PROCESS_SIGNAL_DELIVERY_TERMINATE,
+        Scheduler__deliver_pending_signal(kernel->scheduler, &target->thread, Process__required_context(target)));
+    TEST_ASSERT_EQUAL(PROC_STATE_DEAD, target->thread.state);
     TEST_ASSERT_FALSE(Process__has_pending_signal(target));
     TEST_ASSERT_FALSE(scheduler_contains_process(target->pid));
 }
@@ -515,7 +650,8 @@ void test_signal_handler_rejects_unsupported_signal(void)
     Scheduler__schedule(kernel->scheduler, target);
 
     match_result(
-        Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)target->pid, (Anything)99, 0, 0, 0),
+        Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)target->pid, (Anything)99, 0, 0, 0,
+                        &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -533,7 +669,7 @@ void test_signal_handler_zero_probes_process_without_queuing_signal(void)
     Scheduler__schedule(kernel->scheduler, target);
 
     match_result(
-        Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)target->pid, 0, 0, 0, 0),
+        Signal__handler(kernel, Some(ProcessPtr, sender), (Anything)target->pid, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
@@ -551,7 +687,7 @@ void test_signal_handler_zero_rejects_missing_process(void)
     Scheduler__schedule(kernel->scheduler, sender);
 
     match_result(
-        Signal__handler(kernel, Some(ProcessPtr, sender), 999, 0, 0, 0, 0),
+        Signal__handler(kernel, Some(ProcessPtr, sender), 999, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -577,7 +713,8 @@ void test_signal_control_handler_installs_actions_and_manages_the_process_mask(v
     };
 
     match_result(
-        SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&action_request, 0, 0, 0, 0),
+        SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&action_request, 0, 0, 0, 0,
+                               &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
@@ -595,7 +732,8 @@ void test_signal_control_handler_installs_actions_and_manages_the_process_mask(v
         .mask_operation = PROCESS_SIGNAL_MASK_BLOCK,
         .mask = blocked,
     };
-    match_result(SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&mask_request, 0, 0, 0, 0),
+    match_result(SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&mask_request, 0, 0, 0, 0,
+                                        &None(ThreadPtr)),
                  success_do_nothing(),
         error_test_fail()
     );
@@ -606,7 +744,8 @@ void test_signal_control_handler_installs_actions_and_manages_the_process_mask(v
     ProcessSignalControlRequest pending_request = {
         .operation = PROCESS_SIGNAL_CONTROL_PENDING,
     };
-    match_result(SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&pending_request, 0, 0, 0, 0),
+    match_result(SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&pending_request, 0, 0, 0, 0,
+                                        &None(ThreadPtr)),
                  success_do_nothing(),
         error_test_fail()
     );
@@ -620,7 +759,7 @@ void test_signal_return_handler_restores_the_interrupted_context(void)
         .handler = 0x12340000,
         .restorer = 0x56780000,
     };
-    ProcessContext interrupted = {
+    ThreadContext interrupted = {
         .x = {0x1122},
         .sp = 0x3344,
         .elr = 0x5566,
@@ -636,7 +775,7 @@ void test_signal_return_handler_restores_the_interrupted_context(void)
     );
 
     match_result(
-        SignalReturn__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        SignalReturn__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(SYSCALL_CONTEXT_RESTORED, result);
@@ -648,7 +787,7 @@ void test_signal_return_handler_restores_the_interrupted_context(void)
     TEST_ASSERT_EQUAL_UINT64(0x5566, Process__required_context(process)->elr);
 }
 
-void test_only_signal_return_result_restores_the_process_context(void)
+void test_only_signal_return_result_restores_the_thread_context(void)
 {
     TEST_ASSERT_TRUE(SystemCallResult__restores_context(SYSCALL_PROCESS_SIGNAL_RETURN, SYSCALL_CONTEXT_RESTORED));
     TEST_ASSERT_FALSE(SystemCallResult__restores_context(SYSCALL_AUTH, SYSCALL_CONTEXT_RESTORED));
@@ -665,7 +804,7 @@ void test_signal_control_alarm_replaces_timer_and_suspend_parks_atomically(void)
         .alarm_seconds = 5,
     };
     match_result(
-        SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&alarm, 0, 0, 0, 0),
+        SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&alarm, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, result);
@@ -674,8 +813,9 @@ void test_signal_control_alarm_replaces_timer_and_suspend_parks_atomically(void)
     );
     test_cpu_time_usec = 3200000;
     alarm.alarm_seconds = 7;
-    match_result(SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&alarm, 0, 0, 0, 0),
-                 success_do_nothing(),
+    match_result(
+        SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&alarm, 0, 0, 0, 0, &None(ThreadPtr)),
+        success_do_nothing(),
         error_test_fail()
     );
     TEST_ASSERT_EQUAL_UINT64(3, alarm.previous_alarm_seconds);
@@ -685,14 +825,14 @@ void test_signal_control_alarm_replaces_timer_and_suspend_parks_atomically(void)
         .mask = 1ULL << (PROCESS_SIGNAL_USER_1 - 1),
     };
     match_result(
-        SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&suspend, 0, 0, 0, 0),
+        SignalControl__handler(kernel, Some(ProcessPtr, process), (Anything)&suspend, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
             TEST_ASSERT_EQUAL(SYSCALL_IO_BLOCK, code);
         }
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, process->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, process->thread.state);
     TEST_ASSERT_TRUE(Process__has_parked_operation(process, PARK_WAIT_SIGNAL, &None(OperationKey)));
 }
 
@@ -707,7 +847,7 @@ void test_process_group_handler_gets_sets_and_creates_session(void)
         .pid = 0,
     };
     match_result(
-        ProcessGroup__handler(kernel, Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
+        ProcessGroup__handler(kernel, Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_GROUP_OK, result);
@@ -718,16 +858,18 @@ void test_process_group_handler_gets_sets_and_creates_session(void)
 
     request.operation = PROCESS_GROUP_SET;
     request.process_group_id = 0;
-    match_result(ProcessGroup__handler(kernel, Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
-                 success_do_nothing(),
+    match_result(
+        ProcessGroup__handler(kernel, Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0, &None(ThreadPtr)),
+        success_do_nothing(),
         error_test_fail()
     );
     TEST_ASSERT_EQUAL_INT64(process->pid, request.result_id);
 
     process->process_group_id = 60;
     request.operation = PROCESS_GROUP_CREATE_SESSION;
-    match_result(ProcessGroup__handler(kernel, Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0),
-                 success_do_nothing(),
+    match_result(
+        ProcessGroup__handler(kernel, Some(ProcessPtr, process), (Anything)&request, 0, 0, 0, 0, &None(ThreadPtr)),
+        success_do_nothing(),
         error_test_fail()
     );
     TEST_ASSERT_EQUAL_INT64(process->pid, request.result_id);
@@ -757,15 +899,16 @@ void test_process_wait_child_event_handler_returns_queued_child_event(void)
     ProcessChildEvent target = ProcessChildEvent__new();
 
     match_result(
-        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, (Anything)-1, 0, 0, 0),
+        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, (Anything)-1, 0, 0, 0,
+                                       &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_OK, result);
             TEST_ASSERT_EQUAL_UINT64(event.pid, target.pid);
             TEST_ASSERT_EQUAL_INT64(event.status, target.status);
             TEST_ASSERT_EQUAL_UINT64(event.type, target.type);
-            TEST_ASSERT_EQUAL_UINT64(event.user_usec, parent->children_user_usec);
-            TEST_ASSERT_EQUAL_UINT64(event.system_usec, parent->children_system_usec);
+            TEST_ASSERT_EQUAL_UINT64(event.user_usec, parent->accounting.children_user_usec);
+            TEST_ASSERT_EQUAL_UINT64(event.system_usec, parent->accounting.children_system_usec);
         },
         error_test_fail()
     );
@@ -774,15 +917,15 @@ void test_process_wait_child_event_handler_returns_queued_child_event(void)
 void test_process_times_handler_reports_current_and_waited_child_cpu_time(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_RUNNING);
-    process->children_user_usec = 70;
-    process->children_system_usec = 20;
-    CPUUsage__start_mode(&process->cpu_usage, 10, 0, CPU_USAGE_USER);
-    CPUUsage__transition(&process->cpu_usage, 30, 0, CPU_USAGE_SYSTEM);
+    process->accounting.children_user_usec = 70;
+    process->accounting.children_system_usec = 20;
+    CPUUsage__start_mode(&process->accounting.cpu_usage, 10, 0, CPU_USAGE_USER);
+    CPUUsage__transition(&process->accounting.cpu_usage, 30, 0, CPU_USAGE_SYSTEM);
     test_cpu_time_usec = 50;
     ProcessTimes times = ProcessTimes__new();
 
     match_result(
-        ProcessTimes__handler(kernel, Some(ProcessPtr, process), (Anything)&times, 0, 0, 0, 0),
+        ProcessTimes__handler(kernel, Some(ProcessPtr, process), (Anything)&times, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_TIMES_OK, result);
@@ -801,7 +944,7 @@ void test_process_times_handler_rejects_missing_output(void)
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_RUNNING);
 
     match_result(
-        ProcessTimes__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        ProcessTimes__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -817,7 +960,7 @@ void test_process_identity_handler_reports_current_and_parent_process_ids(void)
     ProcessIdentity identity = ProcessIdentity__new(0, 0);
 
     match_result(
-        ProcessIdentity__handler(kernel, Some(ProcessPtr, child), (Anything)&identity, 0, 0, 0, 0),
+        ProcessIdentity__handler(kernel, Some(ProcessPtr, child), (Anything)&identity, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_IDENTITY_OK, result);
@@ -834,7 +977,7 @@ void test_process_identity_handler_reports_zero_for_process_without_parent(void)
     ProcessIdentity identity = ProcessIdentity__new(0, 99);
 
     match_result(
-        ProcessIdentity__handler(kernel, Some(ProcessPtr, process), (Anything)&identity, 0, 0, 0, 0),
+        ProcessIdentity__handler(kernel, Some(ProcessPtr, process), (Anything)&identity, 0, 0, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_IDENTITY_OK, result);
@@ -850,7 +993,7 @@ void test_process_identity_handler_rejects_missing_process_or_output(void)
     ProcessIdentity identity = ProcessIdentity__new(12, 34);
 
     match_result(
-        ProcessIdentity__handler(kernel, None(ProcessPtr), (Anything)&identity, 0, 0, 0, 0),
+        ProcessIdentity__handler(kernel, None(ProcessPtr), (Anything)&identity, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -861,7 +1004,8 @@ void test_process_identity_handler_rejects_missing_process_or_output(void)
     TEST_ASSERT_EQUAL_UINT64(34, identity.parent_pid);
 
     match_result(
-        ProcessIdentity__handler(kernel, Some(ProcessPtr, dummy_process(1, cpu, PROC_STATE_RUNNING)), 0, 0, 0, 0, 0),
+        ProcessIdentity__handler(kernel, Some(ProcessPtr, dummy_process(1, cpu, PROC_STATE_RUNNING)), 0, 0, 0, 0, 0,
+                                 &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -895,7 +1039,8 @@ void test_process_wait_child_event_selects_child_without_consuming_other_event(v
 
     ProcessChildEvent target = ProcessChildEvent__new();
     match_result(
-        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, selected.pid, 0, 0, 0),
+        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, selected.pid, 0, 0, 0,
+                                       &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_OK, result);
@@ -905,7 +1050,8 @@ void test_process_wait_child_event_selects_child_without_consuming_other_event(v
     );
 
     match_result(
-        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, first.pid, 0, 0, 0),
+        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, first.pid, 0, 0, 0,
+                                       &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_OK, result);
@@ -918,8 +1064,7 @@ void test_process_wait_child_event_selects_child_without_consuming_other_event(v
 void test_process_wait_child_event_filters_stopped_and_continued_events_by_options(void)
 {
     ProcessPtr parent = dummy_process(1, cpu, PROC_STATE_READY);
-    ProcessPtr child = dummy_process(42, cpu, PROC_STATE_READY);
-    child->parent = Some(ProcessPtr, parent);
+    ProcessPtr child = dummy_process_with_parent(42, cpu, PROC_STATE_READY, parent);
     ProcessChildEvent stopped = {
         .pid = child->pid,
         .status = PROCESS_WAIT_STATUS_STOPPED(PROCESS_SIGNAL_TERMINAL_STOP),
@@ -944,7 +1089,7 @@ void test_process_wait_child_event_filters_stopped_and_continued_events_by_optio
     ProcessChildEvent target = ProcessChildEvent__new();
     match_result(
         ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, child->pid,
-                                       PROCESS_CHILD_WAIT_NOHANG, 0, 0),
+                                       PROCESS_CHILD_WAIT_NOHANG, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_PENDING, result);
@@ -953,7 +1098,7 @@ void test_process_wait_child_event_filters_stopped_and_continued_events_by_optio
     );
     match_result(
         ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, child->pid,
-                                       PROCESS_CHILD_WAIT_UNTRACED, 0, 0),
+                                       PROCESS_CHILD_WAIT_UNTRACED, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_OK, result);
@@ -963,7 +1108,7 @@ void test_process_wait_child_event_filters_stopped_and_continued_events_by_optio
     );
     match_result(
         ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, child->pid,
-                                       PROCESS_CHILD_WAIT_CONTINUED, 0, 0),
+                                       PROCESS_CHILD_WAIT_CONTINUED, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_OK, result);
@@ -976,26 +1121,25 @@ void test_process_wait_child_event_filters_stopped_and_continued_events_by_optio
 void test_process_wait_child_event_nohang_distinguishes_live_and_missing_children(void)
 {
     ProcessPtr parent = dummy_process(1, cpu, PROC_STATE_READY);
-    ProcessPtr child = dummy_process(42, cpu, PROC_STATE_READY);
-    child->parent = Some(ProcessPtr, parent);
+    ProcessPtr child = dummy_process_with_parent(42, cpu, PROC_STATE_READY, parent);
     Scheduler__schedule_on_cpu(kernel->scheduler, parent, cpu);
     Scheduler__schedule(kernel->scheduler, child);
     ProcessChildEvent target = ProcessChildEvent__new();
 
     match_result(
         ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, child->pid,
-                                       PROCESS_CHILD_WAIT_NOHANG, 0, 0),
+                                       PROCESS_CHILD_WAIT_NOHANG, 0, 0, &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_PENDING, result);
-            TEST_ASSERT_EQUAL(PROC_STATE_READY, parent->state);
+            TEST_ASSERT_EQUAL(PROC_STATE_READY, parent->thread.state);
         },
         error_test_fail()
     );
 
     match_result(
         ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, 99,
-                                       PROCESS_CHILD_WAIT_NOHANG, 0, 0),
+                                       PROCESS_CHILD_WAIT_NOHANG, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -1007,53 +1151,50 @@ void test_process_wait_child_event_nohang_distinguishes_live_and_missing_childre
 void test_selected_child_wait_ignores_unrelated_child_exit(void)
 {
     ProcessPtr parent = dummy_process(1, cpu, PROC_STATE_READY);
-    ProcessPtr selected = dummy_process(42, cpu, PROC_STATE_READY);
-    ProcessPtr other = dummy_process(43, cpu, PROC_STATE_READY);
-    selected->parent = Some(ProcessPtr, parent);
-    other->parent = Some(ProcessPtr, parent);
+    ProcessPtr selected = dummy_process_with_parent(42, cpu, PROC_STATE_READY, parent);
+    ProcessPtr other = dummy_process_with_parent(43, cpu, PROC_STATE_READY, parent);
     Scheduler__schedule_on_cpu(kernel->scheduler, parent, cpu);
     Scheduler__schedule_on_cpu(kernel->scheduler, selected, cpu);
     Scheduler__schedule_on_cpu(kernel->scheduler, other, cpu);
     ProcessChildEvent target = ProcessChildEvent__new();
 
     match_result(
-        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, selected->pid, 0, 0, 0),
+        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, selected->pid, 0, 0, 0,
+                                       &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_QUEUE_EMPTY, code);
         }
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->thread.state);
 
     match_result(Scheduler__exit(kernel->scheduler, other, 3),
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->thread.state);
     TEST_ASSERT_TRUE(Process__has_parked_operation(parent, PARK_WAIT_CHILD_EVENT, &Some(OperationKey, selected->pid)));
 
     match_result(Scheduler__exit(kernel->scheduler, selected, 4),
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, parent->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, parent->thread.state);
 }
 
 void test_child_exit_events_use_posix_wait_status_encoding(void)
 {
     ProcessPtr parent = dummy_process(1, cpu, PROC_STATE_READY);
-    ProcessPtr exited = dummy_process(42, cpu, PROC_STATE_READY);
-    ProcessPtr signaled = dummy_process(43, cpu, PROC_STATE_READY);
+    ProcessPtr exited = dummy_process_with_parent(42, cpu, PROC_STATE_READY, parent);
+    ProcessPtr signaled = dummy_process_with_parent(43, cpu, PROC_STATE_READY, parent);
     ProcessID exited_pid = exited->pid;
     ProcessID signaled_pid = signaled->pid;
-    exited->parent = Some(ProcessPtr, parent);
-    signaled->parent = Some(ProcessPtr, parent);
     Scheduler__schedule_on_cpu(kernel->scheduler, parent, cpu);
     Scheduler__schedule_on_cpu(kernel->scheduler, exited, cpu);
     Scheduler__schedule_on_cpu(kernel->scheduler, signaled, cpu);
-    CPUUsage__start_mode(&exited->cpu_usage, 0, 0, CPU_USAGE_USER);
-    CPUUsage__transition(&exited->cpu_usage, 10, 0, CPU_USAGE_SYSTEM);
+    CPUUsage__start_mode(&exited->accounting.cpu_usage, 0, 0, CPU_USAGE_USER);
+    CPUUsage__transition(&exited->accounting.cpu_usage, 10, 0, CPU_USAGE_SYSTEM);
     test_cpu_time_usec = 20;
 
     match_result(Scheduler__exit(kernel->scheduler, exited, 7),
@@ -1067,18 +1208,20 @@ void test_child_exit_events_use_posix_wait_status_encoding(void)
 
     ProcessChildEvent target = ProcessChildEvent__new();
     match_result(
-        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, exited_pid, 0, 0, 0),
+        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, exited_pid, 0, 0, 0,
+                                       &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_OK, result);
             TEST_ASSERT_EQUAL_UINT64(PROCESS_WAIT_STATUS_EXITED(7), target.status);
-            TEST_ASSERT_EQUAL_UINT64(10, parent->children_user_usec);
-            TEST_ASSERT_EQUAL_UINT64(10, parent->children_system_usec);
+            TEST_ASSERT_EQUAL_UINT64(10, parent->accounting.children_user_usec);
+            TEST_ASSERT_EQUAL_UINT64(10, parent->accounting.children_system_usec);
         },
         error_test_fail()
     );
     match_result(
-        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, signaled_pid, 0, 0, 0),
+        ProcessWaitChildEvent__handler(kernel, Some(ProcessPtr, parent), (Anything)&target, signaled_pid, 0, 0, 0,
+                                       &None(ThreadPtr)),
         success(result)
         {
             TEST_ASSERT_EQUAL(PROCESS_CHILD_EVENT_OK, result);
@@ -1093,7 +1236,7 @@ void test_shutdown_handler_invokes_system_shutdown(void)
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
 
     match_result(
-        Shutdown__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0),
+        Shutdown__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {

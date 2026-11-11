@@ -5,6 +5,7 @@
 .global asm_switch_context
 asm_switch_context:
     msr     daifset, #2
+    stp x0, x2, [sp, #-16]!
 
     // ------------------------------------------------------
     // 1. Enable FP/SIMD
@@ -15,7 +16,7 @@ asm_switch_context:
     isb
 
     // ------------------------------------------------------
-    // 2. Load SP to the ProcessContext in kernel space
+    // 2. Load SP to the ThreadContext in kernel space
     // ------------------------------------------------------
 
     msr     ttbr0_el1, x1
@@ -23,6 +24,9 @@ asm_switch_context:
     tlbi vmalle1
     dsb ish
     isb
+    ldr x0, [sp, #8]
+    bl Process__address_space_switched
+    ldp x0, x2, [sp], #16
     reset_kernel_stack
     restore_parked_context
 
@@ -47,7 +51,7 @@ asm_switch_kernel_context:
     isb
 
     // ------------------------------------------------------
-    // 2. Load SP to the ProcessContext in kernel space
+    // 2. Load SP to the ThreadContext in kernel space
     // ------------------------------------------------------
 
     msr     ttbr0_el1, x1

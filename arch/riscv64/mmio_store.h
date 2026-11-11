@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../../kernel/arch/process_context.h"
+#include "../../kernel/arch/thread_context.h"
 #include "../../kernel/types/optional.h"
 #include "process.h"
 
@@ -31,8 +31,8 @@ static inline RiscVMMIOStore RiscVMMIOStore__new(Address address, uint64_t value
     };
 }
 
-Optional(RiscVMMIOStore) RiscVMMIOStore__decode(uint32_t instruction, ProcessContextPtr context);
-void RiscVMMIOStore__perform(ConstRiscVMMIOStorePtr self, Address access_address, ProcessContextPtr context);
-bool RiscVMMIOStore__skip_following_fence(uint32_t instruction, ProcessContextPtr context);
+Optional(RiscVMMIOStore) RiscVMMIOStore__decode(uint32_t instruction, ThreadContextPtr context);
+void RiscVMMIOStore__perform(ConstRiscVMMIOStorePtr self, Address access_address, ThreadContextPtr context);
+bool RiscVMMIOStore__skip_following_fence(uint32_t instruction, ThreadContextPtr context);
 
 #endif

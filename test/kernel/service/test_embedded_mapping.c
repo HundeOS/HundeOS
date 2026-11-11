@@ -47,23 +47,23 @@ void test_archive_is_only_mapped_into_bootstrap_consumers_read_only_and_non_exec
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
-                                           false, false, sizeof(archive)));
+    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                           EMBEDDED_FS_VADDR, true, false, false, sizeof(archive)));
     process->name = bstr(EMBEDDED_FS_HOST);
     match_result(EmbeddedArchive__map_process(process),
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
-                                          false, false, sizeof(archive)));
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                          EMBEDDED_FS_VADDR, true, false, false, sizeof(archive)));
     ProcessPtr driver = dummy_process(21, 0, PROC_STATE_READY);
     driver->name = bstr(EMBEDDED_FS_DRIVER_HOST);
     match_result(EmbeddedArchive__map_process(driver),
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&driver->page_table), EMBEDDED_FS_VADDR, true,
-                                          false, false, sizeof(archive)));
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&driver->address_space.page_table),
+                                          EMBEDDED_FS_VADDR, true, false, false, sizeof(archive)));
 }
 
 void test_retired_standalone_embedfs_does_not_receive_archive_mapping(void)
@@ -73,8 +73,8 @@ void test_retired_standalone_embedfs_does_not_receive_archive_mapping(void)
         success_do_nothing(),
         error_test_fail()
     );
-    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
-                                           false, false, sizeof(archive)));
+    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                           EMBEDDED_FS_VADDR, true, false, false, sizeof(archive)));
 }
 
 void test_invalid_archive_does_not_get_mapped(void)
@@ -88,8 +88,8 @@ void test_invalid_archive_does_not_get_mapped(void)
             TEST_ASSERT_EQUAL(PROCESS_FAILED_TO_SETUP, code);
         }
     );
-    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), EMBEDDED_FS_VADDR, true,
-                                           false, false, sizeof(archive)));
+    TEST_ASSERT_FALSE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                           EMBEDDED_FS_VADDR, true, false, false, sizeof(archive)));
 }
 
 void test_partial_last_page_is_not_exposed_to_userspace(void)

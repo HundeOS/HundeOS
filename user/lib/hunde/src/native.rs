@@ -4,6 +4,14 @@ use core::alloc::Layout;
 use core::ffi::c_void;
 use core::ptr::NonNull;
 
+pub(crate) unsafe fn copy_to_mapped(target: *mut u8, source: &[u8]) {
+    unsafe { core::ptr::copy(source.as_ptr(), target, source.len()) };
+}
+
+pub(crate) unsafe fn copy_from_mapped(source: *const u8, target: &mut [u8]) {
+    unsafe { core::ptr::copy(source, target.as_mut_ptr(), target.len()) };
+}
+
 pub(crate) struct Storage {
     address: NonNull<u8>,
     layout: Layout,
@@ -34,6 +42,18 @@ impl Drop for Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mapped_copies_preserve_binary_data_and_neighboring_bytes() {
+        let mut mapping = [99; 32];
+        let bytes = [0, 255, 0, 128, 10, 13];
+        unsafe { copy_to_mapped(mapping.as_mut_ptr().add(7), &bytes) };
+        let mut snapshot = [0; 6];
+        unsafe { copy_from_mapped(mapping.as_ptr().add(7), &mut snapshot) };
+        assert_eq!(snapshot, bytes);
+        assert_eq!(&mapping[..7], &[99; 7]);
+        assert_eq!(&mapping[13..], &[99; 19]);
+    }
 
     #[test]
     fn native_storage_is_aligned_zeroed_and_stable_when_moved() {

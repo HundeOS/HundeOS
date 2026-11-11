@@ -61,24 +61,10 @@ static Result(ValidatedExecPayload) ExecPayload__copy_from_user(ConstSpawnReques
 static Result(ProcessPtr) ExecLoad__caller(ParkedOperationPtr parked_operation)
 {
     match_optional(
-        parked_operation->kernel_context->scheduler,
-        some(scheduler)
+        parked_operation->kernel_context->thread,
+        some(thread)
         {
-            match_optional(
-                parked_operation->kernel_context->pid,
-                some(pid)
-                {
-                    match_optional(
-                        Scheduler__find_process_by_pid(scheduler, pid),
-                        some(process)
-                        {
-                            return Success(ProcessPtr, process);
-                        },
-                        none_do_nothing()
-                    );
-                },
-                none_do_nothing()
-            );
+            return Success(ProcessPtr, thread->owner);
         },
         none_do_nothing()
     );
@@ -95,7 +81,7 @@ static Result(Anything) ExecLoad__complete_syscall(ParkedOperationPtr parked_ope
                 ExecLoad__continue(process),
                 success(child)
                 {
-                    return Success(Anything, child == process ? process->startup_argument_count : child->pid);
+                    return Success(Anything, child == process ? process->image.startup_argument_count : child->pid);
                 },
                 error(code, message)
                 {
@@ -156,7 +142,7 @@ static Result(SystemCallResult)
         ExecLoad__continue(process),
         success(child)
         {
-            return Success(SystemCallResult, child == process ? process->startup_argument_count : child->pid);
+            return Success(SystemCallResult, child == process ? process->image.startup_argument_count : child->pid);
         },
         error(code, message)
         {
@@ -185,15 +171,16 @@ static Result(SystemCallResult)
     return Error(SystemCallResult, exec_load_pending, SPAWN_FAILED);
 }
 
-Result(SystemCallResult) Exec__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
-                                       Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    Exec__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                  Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
-    return ExecRequest__handler(kernel, proc, arg1, arg2, arg3, arg4, arg5);
+    return ExecRequest__handler(kernel, proc, arg1, arg2, arg3, arg4, arg5, caller_thread);
 }
 
 static Result(SystemCallResult)
     ExecRequest__execute(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
-                         Anything arg4, Anything arg5, bool bootstrap)
+                         Anything arg4, Anything arg5, bool bootstrap, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (arg1 == 0)
     {
@@ -206,7 +193,7 @@ static Result(SystemCallResult)
         some(value)
         {
             process = value;
-            if (!is_nothing(process->exec_load))
+            if (!is_nothing(process->image.exec_load))
             {
                 return Error(SystemCallResult, bstr("Executable load already pending"), SPAWN_FAILED);
             }
@@ -220,6 +207,10 @@ static Result(SystemCallResult)
     SpawnRequest request = *(SpawnRequestPtr)arg1;
 
     bool overlay = request.mode == P_OVERLAY;
+    if (overlay && Process__has_multiple_threads(process))
+    {
+        return Error(SystemCallResult, bstr("Multithreaded exec is not supported"), SPAWN_FAILED);
+    }
     if (overlay && (bootstrap || request.auth_ticket_id != SPAWN_INHERIT_AUTH_TICKET))
     {
         return Error(SystemCallResult, bstr("Invalid process overlay request"), SPAWN_FAILED);
@@ -264,7 +255,8 @@ static Result(SystemCallResult)
         );
     }
 
-    CallContext call_context = CallContext__new(proc, SYSCALL_EXEC_REQUEST, arg1, arg2, arg3, arg4, arg5);
+    CallContext call_context =
+        CallContext__new(proc, caller_thread, SYSCALL_EXEC_REQUEST, arg1, arg2, arg3, arg4, arg5);
     OriginatingContext originating_context = OriginatingContext__syscall(kernel, &call_context);
 
     SpawnMode mode = request.mode;
@@ -338,10 +330,11 @@ static Result(SystemCallResult)
     return Error(SystemCallResult, bstring("Exec request handler failed"), SPAWN_FAILED);
 }
 
-Result(SystemCallResult) ExecRequest__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                              Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ExecRequest__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                         Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
-    return ExecRequest__execute(kernel, proc, arg1, arg2, arg3, arg4, arg5, false);
+    return ExecRequest__execute(kernel, proc, arg1, arg2, arg3, arg4, arg5, false, caller_thread);
 }
 
 static bool Boot__authorized(KernelPtr kernel, OptionalPtr(ProcessPtr) proc)
@@ -360,19 +353,21 @@ static bool Boot__authorized(KernelPtr kernel, OptionalPtr(ProcessPtr) proc)
     );
 }
 
-Result(SystemCallResult) BootSpawn__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                            Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    BootSpawn__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                       Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (!Boot__authorized(kernel, proc))
     {
         return Error(SystemCallResult, bstr("Bootstrap authority unavailable"), SPAWN_FAILED);
     }
 
-    return ExecRequest__execute(kernel, proc, arg1, arg2, arg3, arg4, arg5, true);
+    return ExecRequest__execute(kernel, proc, arg1, arg2, arg3, arg4, arg5, true, caller_thread);
 }
 
-Result(SystemCallResult) BootComplete__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                               Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    BootComplete__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                          Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (!Boot__authorized(kernel, proc))
     {

@@ -182,6 +182,61 @@ Result(IOStatus) IO__set_terminal_attributes(IOHandle handle, IOTerminalAttribut
                                            : IO__status_result(IOClient__set_terminal_attributes(handle, attributes));
 }
 
+Result(ProcessGroupID) IO__get_terminal_foreground_group(IOHandle handle)
+{
+    match_optional(
+        IO__standard_stream(handle),
+        some(stream)
+        {
+            match_result(
+                IOStandardStream__open(stream),
+                success(opened)
+                {
+                    return IO__get_terminal_foreground_group(opened);
+                },
+                error(code, message)
+                {
+                    return Error(ProcessGroupID, message, code);
+                }
+            );
+            return Error(ProcessGroupID, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+        },
+        none_do_nothing()
+    );
+    if (handle < IO_SESSION_HANDLE_BASE)
+    {
+        return Error(ProcessGroupID, IO__error_message(IO_UNKNOWN_HANDLE), IO_UNKNOWN_HANDLE);
+    }
+    IOReply reply = IOClient__get_foreground_group(handle);
+    return reply.status == IO_OK ? Success(ProcessGroupID, (ProcessGroupID)reply.value)
+                                 : Error(ProcessGroupID, IO__error_message(reply.status), reply.status);
+}
+
+Result(IOStatus) IO__set_terminal_foreground_group(IOHandle handle, ProcessGroupID group)
+{
+    match_optional(
+        IO__standard_stream(handle),
+        some(stream)
+        {
+            match_result(
+                IOStandardStream__open(stream),
+                success(opened)
+                {
+                    return IO__set_terminal_foreground_group(opened, group);
+                },
+                error(code, message)
+                {
+                    return Error(IOStatus, message, code);
+                }
+            );
+            return Error(IOStatus, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
+        },
+        none_do_nothing()
+    );
+    return handle < IO_SESSION_HANDLE_BASE ? Error(IOStatus, IO__error_message(IO_UNKNOWN_HANDLE), IO_UNKNOWN_HANDLE)
+                                           : IO__status_result(IOClient__set_foreground_group(handle, group));
+}
+
 Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags)
 {
     IOHandle handle = IOClient__open(path, flags);

@@ -2,10 +2,66 @@
 
 #include "syscalls/process.h"
 #include "../arch/cpu.h"
+#include "../kalloc.h"
 #include "../scheduler/kernel_context.h"
 #include "../scheduler/scheduler.h"
 
 static BString invalid_process_list_request = bstr("Invalid process list request");
+
+Result(SystemCallResult)
+    ThreadWait__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                        Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
+{
+    if (arg2 > UINT32_MAX)
+    {
+        return Error(SystemCallResult, bstr("Invalid atomic wait value"), THREAD_WAIT_INVALID);
+    }
+    match_optional(
+        *caller_thread,
+        some(caller)
+        {
+            match_result(
+                Scheduler__wait_atomic(kernel->scheduler, caller, arg1, (ThreadWaitValue)arg2, arg3),
+                success(status)
+                {
+                    return Success(SystemCallResult, status);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, code);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+    return Error(SystemCallResult, bstr("Invalid atomic wait caller"), THREAD_WAIT_INVALID);
+}
+
+Result(SystemCallResult)
+    ThreadWake__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                        Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
+{
+    match_optional(
+        *caller_thread,
+        some(caller)
+        {
+            match_result(
+                Scheduler__wake_atomic(kernel->scheduler, caller, arg1, arg2),
+                success(count)
+                {
+                    return Success(SystemCallResult, count);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, code);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+    return Error(SystemCallResult, bstr("Invalid atomic wake caller"), THREAD_WAIT_INVALID);
+}
+
 static BString invalid_child_event_request = bstr("Invalid child event request");
 static BString invalid_sleep_request = bstr("Invalid sleep request");
 static BString invalid_idle_wait_request = bstr("Invalid idle wait request");
@@ -15,8 +71,117 @@ static BString sleep_pending = bstr("Sleep pending");
 static BString invalid_fork_request = bstr("Invalid fork request");
 static BString invalid_process_group_request = bstr("Invalid process group request");
 
-Result(SystemCallResult) ProcessRegistryMap__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                                     Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ThreadLocalImage__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                              Anything arg3, Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
+{
+    match_optional(
+        *caller_thread,
+        some(caller)
+        {
+            match_optional(
+                Process__writable_user_kernel_mapping(caller->owner, arg1, sizeof(ThreadLocalImage)),
+                some(mapping)
+                {
+                    Kernel__memcopy(addr(&caller->owner->image.thread_local_image), mapping.virtual_addr,
+                                    sizeof(ThreadLocalImage));
+                    return Success(SystemCallResult, THREAD_OPERATION_OK);
+                },
+                none_do_nothing()
+            );
+        },
+        none_do_nothing()
+    );
+    return Error(SystemCallResult, bstr("Invalid thread-local request"), THREAD_OPERATION_INVALID);
+}
+
+Result(SystemCallResult)
+    ThreadCreate__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                          Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
+{
+    match_optional(
+        *caller_thread,
+        some(caller)
+        {
+            if (arg4 == 0 || arg4 % 16 != 0 ||
+                is_nothing(Process__writable_user_kernel_mapping(caller->owner, arg4, 1)))
+            {
+                return Error(SystemCallResult, bstr("Invalid thread pointer"), THREAD_OPERATION_INVALID);
+            }
+            match_result(
+                Scheduler__create_thread(kernel->scheduler, caller, arg1, arg2, arg3, arg4),
+                success(id)
+                {
+                    return Success(SystemCallResult, id);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, code);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+    return Error(SystemCallResult, bstr("Invalid thread caller"), THREAD_OPERATION_INVALID);
+}
+
+Result(SystemCallResult)
+    ThreadExit__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                        Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
+{
+    match_optional(
+        *caller_thread,
+        some(caller)
+        {
+            match_result(
+                Scheduler__exit_thread(kernel->scheduler, caller, arg1),
+                success(_)
+                {
+                    return Success(SystemCallResult, THREAD_OPERATION_OK);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, code);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+    return Error(SystemCallResult, bstr("Invalid thread caller"), THREAD_OPERATION_INVALID);
+}
+
+Result(SystemCallResult)
+    ThreadJoin__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                        Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
+{
+    if (arg2 == 0)
+    {
+        return Error(SystemCallResult, bstr("Invalid thread join result"), THREAD_OPERATION_INVALID);
+    }
+    match_optional(
+        *caller_thread,
+        some(caller)
+        {
+            match_result(
+                Scheduler__join_thread(kernel->scheduler, caller, (ThreadID)arg1, (ThreadJoinResultPtr)arg2),
+                success(code)
+                {
+                    return Success(SystemCallResult, code);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, code);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+    return Error(SystemCallResult, bstr("Invalid thread caller"), THREAD_OPERATION_INVALID);
+}
+
+Result(SystemCallResult)
+    ProcessRegistryMap__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                Anything arg3, Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     match_optional(
         *proc,
@@ -40,8 +205,9 @@ Result(SystemCallResult) ProcessRegistryMap__handler(KernelPtr kernel, OptionalP
     return Error(SystemCallResult, bstr("Invalid process registry caller"), PROCESS_REGISTRY_MAP_INVALID_CALLER);
 }
 
-Result(SystemCallResult) ProcessFork__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                              Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessFork__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                         Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     match_optional(
         *proc,
@@ -50,16 +216,24 @@ Result(SystemCallResult) ProcessFork__handler(KernelPtr kernel, OptionalPtr(Proc
             switch ((ProcessForkOperation)arg1)
             {
             case PROCESS_FORK_PREPARE:
-                if (is_something(process->pending_fork_child))
-                {
-                    return Error(SystemCallResult, bstr("Fork child is already pending"), PROCESS_FORK_ALREADY_PENDING);
-                }
                 match_result(
                     Process__fork(process),
                     success(child)
                     {
-                        process->pending_fork_child = Some(ProcessPtr, child);
-                        return Success(SystemCallResult, child->pid);
+                        match_result(
+                            Process__add_pending_fork_child(process, child),
+                            success(_)
+                            {
+                                return Success(SystemCallResult, child->pid);
+                            },
+                            error(code, message)
+                            {
+                                Process__dispose_user_allocations(child);
+                                Process__dispose_page_table(child);
+                                Process__dispose(child);
+                                return Error(SystemCallResult, message, PROCESS_FORK_NO_MEMORY);
+                            }
+                        );
                     },
                     error(code, message)
                     {
@@ -67,16 +241,10 @@ Result(SystemCallResult) ProcessFork__handler(KernelPtr kernel, OptionalPtr(Proc
                     }
                 );
             case PROCESS_FORK_RESUME:
-                match_optional(
-                    process->pending_fork_child,
-                    some(child)
+                match_result(
+                    Process__take_pending_fork_child(process, (ProcessID)arg2),
+                    success(child)
                     {
-                        if (child->pid != (ProcessID)arg2)
-                        {
-                            return Error(SystemCallResult, bstr("Pending fork child does not match"),
-                                         PROCESS_FORK_CHILD_NOT_FOUND);
-                        }
-                        process->pending_fork_child = None(ProcessPtr);
                         match_result(
                             Scheduler__schedule(kernel->scheduler, child),
                             success(_)
@@ -92,27 +260,21 @@ Result(SystemCallResult) ProcessFork__handler(KernelPtr kernel, OptionalPtr(Proc
                             }
                         );
                     },
-                    none()
+                    error(code, message)
                     {
-                        return Error(SystemCallResult, bstr("No fork child is pending"), PROCESS_FORK_CHILD_NOT_FOUND);
+                        return Error(SystemCallResult, message, PROCESS_FORK_CHILD_NOT_FOUND);
                     }
                 );
             case PROCESS_FORK_ABORT:
-                match_optional(
-                    process->pending_fork_child,
-                    some(child)
+                match_result(
+                    Process__abort_pending_fork(process, (ProcessID)arg2),
+                    success(child_pid)
                     {
-                        if (child->pid != (ProcessID)arg2)
-                        {
-                            return Error(SystemCallResult, bstr("Pending fork child does not match"),
-                                         PROCESS_FORK_CHILD_NOT_FOUND);
-                        }
-                        Process__abort_pending_fork(process);
                         return Success(SystemCallResult, 0);
                     },
-                    none()
+                    error(code, message)
                     {
-                        return Error(SystemCallResult, bstr("No fork child is pending"), PROCESS_FORK_CHILD_NOT_FOUND);
+                        return Error(SystemCallResult, message, PROCESS_FORK_CHILD_NOT_FOUND);
                     }
                 );
             default:
@@ -127,8 +289,9 @@ Result(SystemCallResult) ProcessFork__handler(KernelPtr kernel, OptionalPtr(Proc
     return Error(SystemCallResult, invalid_fork_request, PROCESS_FORK_INVALID_CALLER);
 }
 
-Result(SystemCallResult) ProcessCredentials__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                                     Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessCredentials__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                Anything arg3, Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (arg1 == 0 || arg2 == 0)
     {
@@ -181,30 +344,23 @@ static Result(Anything) Process__complete_wait_child_event_syscall(ParkedOperati
         some(scheduler)
         {
             match_optional(
-                parked_operation->kernel_context->pid,
-                some(pid)
+                parked_operation->kernel_context->thread,
+                some(thread)
                 {
-                    match_optional(
-                        Scheduler__find_process_by_pid(scheduler, pid),
-                        some(process)
+                    match_result(
+                        Scheduler__child_take_event(
+                            scheduler, thread->owner,
+                            (int64_t)unwrap_optional(parked_operation->operation_key, (OperationKey)-1),
+                            parked_operation->operation_context),
+                        success(event)
                         {
-                            match_result(
-                                Scheduler__child_take_event(
-                                    scheduler, process,
-                                    (int64_t)unwrap_optional(parked_operation->operation_key, (OperationKey)-1),
-                                    parked_operation->operation_context),
-                                success(event)
-                                {
-                                    Result(Anything) mapped_result = Success(Anything, (Anything)&event);
-                                    return KernelContext__map_result(parked_operation->kernel_context, &mapped_result);
-                                },
-                                error(code, message)
-                                {
-                                    return Error(Anything, message, code);
-                                }
-                            );
+                            Result(Anything) mapped_result = Success(Anything, (Anything)&event);
+                            return KernelContext__map_result(parked_operation->kernel_context, &mapped_result);
                         },
-                        none_do_nothing()
+                        error(code, message)
+                        {
+                            return Error(Anything, message, code);
+                        }
                     );
                 },
                 none_do_nothing()
@@ -216,8 +372,9 @@ static Result(Anything) Process__complete_wait_child_event_syscall(ParkedOperati
     return Error(Anything, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
 }
 
-Result(SystemCallResult) ProcessList__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                              Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessList__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                         Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (arg1 == 0)
     {
@@ -234,8 +391,9 @@ Result(SystemCallResult) ProcessList__handler(KernelPtr kernel, OptionalPtr(Proc
                    Scheduler__process_info_snapshot(kernel->scheduler, request->entries, request->max_entries));
 }
 
-Result(SystemCallResult) ProcessWaitChildEvent__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                                        Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessWaitChildEvent__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                                   Anything arg3, Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     uint64_t options = (uint64_t)arg3;
     uint64_t supported_options = PROCESS_CHILD_WAIT_NOHANG | PROCESS_CHILD_WAIT_UNTRACED | PROCESS_CHILD_WAIT_CONTINUED;
@@ -249,9 +407,9 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(KernelPtr kernel, Option
         some(process)
         {
             ProcessChildEventPtr target = (ProcessChildEventPtr)arg1;
-            KernelContextPtr kernel_context = KernelContext__heap_new_with_mapper(
-                &Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler),
-                ProcessChildEvent__copy_to_target, (Anything)target);
+            KernelContextPtr kernel_context =
+                KernelContext__heap_new_with_mapper(caller_thread, &Some(SchedulerPtr, kernel->scheduler),
+                                                    ProcessChildEvent__copy_to_target, (Anything)target);
 
             match_result(
                 Scheduler__child_wait_with_context_ownership(
@@ -295,23 +453,35 @@ Result(SystemCallResult) ProcessWaitChildEvent__handler(KernelPtr kernel, Option
     return Error(SystemCallResult, invalid_child_event_request, PROCESS_CHILD_EVENT_INVALID_ARGUMENT);
 }
 
-Result(SystemCallResult) ProcessSleep__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                               Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessSleep__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                          Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     match_optional(
         *proc,
         some(process)
         {
-            match_result(
-                Scheduler__sleep_usec(kernel->scheduler, process, (uint64_t)arg1),
-                success(sleeping)
+            match_optional(
+                *caller_thread,
+                some(thread)
                 {
-                    return Error(SystemCallResult, sleep_pending, SYSCALL_IO_BLOCK);
+                    if (thread->owner != process)
+                    {
+                        return Error(SystemCallResult, invalid_sleep_request, PROCESS_SLEEP_INVALID_ARGUMENT);
+                    }
+                    match_result(
+                        Scheduler__sleep_usec(kernel->scheduler, thread, (uint64_t)arg1),
+                        success(sleeping)
+                        {
+                            return Error(SystemCallResult, sleep_pending, SYSCALL_IO_BLOCK);
+                        },
+                        error(code, message)
+                        {
+                            return Error(SystemCallResult, message, PROCESS_SLEEP_FAILED);
+                        }
+                    );
                 },
-                error(code, message)
-                {
-                    return Error(SystemCallResult, message, PROCESS_SLEEP_FAILED);
-                }
+                none_do_nothing()
             );
         },
         none_do_nothing()
@@ -320,8 +490,9 @@ Result(SystemCallResult) ProcessSleep__handler(KernelPtr kernel, OptionalPtr(Pro
     return Error(SystemCallResult, invalid_sleep_request, PROCESS_SLEEP_INVALID_ARGUMENT);
 }
 
-Result(SystemCallResult) ProcessIdleWait__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                                  Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessIdleWait__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                             Anything arg3, Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     CPUID cpu = CPU__id();
     match_optional(
@@ -334,7 +505,17 @@ Result(SystemCallResult) ProcessIdleWait__handler(KernelPtr kernel, OptionalPtr(
                 {
                     if (process == idle_process)
                     {
-                        Scheduler__yield_runnable(kernel->scheduler, process, cpu);
+                        match_optional(
+                            Scheduler__current_thread(kernel->scheduler, cpu),
+                            some(thread)
+                            {
+                                if (thread->owner == process)
+                                {
+                                    Scheduler__yield_runnable(kernel->scheduler, thread, cpu);
+                                }
+                            },
+                            none_do_nothing()
+                        );
                         CPU__wait_for_interrupt();
                         return Success(SystemCallResult, PROCESS_IDLE_WAIT_OK);
                     }
@@ -348,8 +529,9 @@ Result(SystemCallResult) ProcessIdleWait__handler(KernelPtr kernel, OptionalPtr(
     return Error(SystemCallResult, invalid_idle_wait_request, PROCESS_IDLE_WAIT_INVALID_CALLER);
 }
 
-Result(SystemCallResult) ProcessTimes__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                               Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessTimes__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                          Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (arg1 == 0)
     {
@@ -370,8 +552,9 @@ Result(SystemCallResult) ProcessTimes__handler(KernelPtr kernel, OptionalPtr(Pro
     return Error(SystemCallResult, invalid_process_times_request, PROCESS_TIMES_INVALID_ARGUMENT);
 }
 
-Result(SystemCallResult) ProcessIdentity__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                                  Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessIdentity__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
+                             Anything arg3, Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (arg1 == 0)
     {
@@ -394,8 +577,9 @@ Result(SystemCallResult) ProcessIdentity__handler(KernelPtr kernel, OptionalPtr(
     return Error(SystemCallResult, invalid_process_identity_request, PROCESS_IDENTITY_INVALID_ARGUMENT);
 }
 
-Result(SystemCallResult) ProcessGroup__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                               Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    ProcessGroup__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                          Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (arg1 == 0)
     {

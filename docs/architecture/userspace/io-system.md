@@ -241,9 +241,8 @@ state.
 Pinned, unmodified OpenBSD `cat`, `cp`, `grep`, and `tail` sources are built
 directly from `vendor/openbsd` and installed in the disk rootfs under
 `/usr/local/bin`. The pinned, unmodified OpenBSD `kill` source is also built and
-installed there. Its positive-PID and signal-zero paths use the shared signal
-compatibility layer; process-group targets remain unsupported until the process
-group and permission work recorded in `docs/TODO.md` is complete.
+installed there. Its positive-PID, process-group, and signal-zero paths use the
+shared signal compatibility layer and the kernel's process-group permission checks.
 The compatibility stdio layer uses seek-aware file read buffering and
 line-buffered standard output to avoid an I/O-service request for each
 character. `fstat` exposes a transfer block size but not full filesystem
@@ -511,9 +510,9 @@ the queue fills, and wakes pending reads without blocking output dispatch.
 Nonblocking empty reads return `IO_WOULD_BLOCK`. Closing and disconnecting release
 owners; committed inheritance grants retain descriptions until claimed or aborted.
 UART and keyboard Ctrl-C handling for hosted consoles belongs to the host, which
-signals the configured foreground process. Other terminal-mode processing,
-controlling terminals, foreground process groups, window-size reporting, and
-virtual-terminal switching remain separate work. Only one console can consume
+signals the configured foreground process group. Other terminal-mode processing,
+controlling-terminal enforcement, window-size reporting, and virtual-terminal
+switching remain separate work. Only one console can consume
 each currently supported backend pair.
 
 Hardware services remain external. The shared `hunde::terminal::Stream` adapter
@@ -541,13 +540,17 @@ replying. The stream driver retains an
 empty read at its backend until input arrives, so the application request remains
 blocked without Channel request/reply churn or retries through routing services.
 
-The shell assigns its foreground child to the terminal through its authenticated
-input handle, then waits for that child explicitly. While a foreground process is
-assigned, the hosted console consumes the Ctrl-C byte and sends that process
-`PROCESS_SIGNAL_INTERRUPT`; the byte is not returned as input. With no foreground
-child, Ctrl-C reaches the interactive shell and cancels its current input line.
-This is currently single-process foreground ownership. Foreground process groups
-remain necessary before pipelines can receive terminal signals as a unit.
+Login creates a session and initially assigns its group to the terminal. Bash
+uses `tcgetpgrp` and `tcsetpgrp` through its authenticated terminal handle to
+move foreground ownership between itself and jobs. While a foreground group is
+assigned, the hosted console consumes Ctrl-C and requests `PROCESS_SIGNAL_INTERRUPT`
+for that group; the byte is not returned as input. The kernel accepts this
+terminal-origin request only from a process with `PROCESS_CAP_SIGNAL_TERMINAL`,
+only for SIGINT, and only with a group target. The I/O host alone receives this
+capability among `hund` services. Ordinary `kill` retains its UID/session checks.
+Ctrl-C discards queued terminal input and makes the next read for the foreground
+group return `IO_INTERRUPTED`, including when the signal arrives between reads.
+Full controlling-terminal and background-access checks remain future work.
 
 Initial standard descriptors carry terminal endpoint metadata, not another
 process's channel handles. The kernel passes this metadata in the process
@@ -623,6 +626,12 @@ the image; no per-component startup or polling edits are required. This manifest
 is bootstrap configuration, not a runtime hot-reload or unload interface.
 
 ## Socket protocol
+
+TCP loopback is provided separately by the Rust `network.wuff` in the same I/O
+host. `tcp://127.0.0.1:PORT`, `tcp://localhost:PORT`, and `tcp://[::1]:PORT`
+select that component through this common front door. Its generic scheduling,
+TCP lifetimes, limits, and remaining gaps are documented in
+[localhost networking](localhost.md). It does not replace `socket://`.
 
 Socket requests are dispatched by `hunde-io-host` to its loaded Rust
 `socket.wuff` component. The host retains the `socket_router` endpoint for

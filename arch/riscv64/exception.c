@@ -48,15 +48,16 @@ static void Exception__account_current_process(KernelPtr kernel, CPUUsageMode mo
     );
 }
 
-static void Exception__prepare_user_return(KernelPtr kernel, ProcessContextPtr context)
+static void Exception__prepare_user_return(KernelPtr kernel, ThreadContextPtr context)
 {
+    Scheduler__revoke_current_if_terminating(kernel->scheduler, CPU__id(), context);
     match_optional(
-        Scheduler__current_process(kernel->scheduler, CPU__id()),
-        some(process)
+        Scheduler__current_thread(kernel->scheduler, CPU__id()),
+        some(thread)
         {
-            if (Scheduler__deliver_pending_signal(kernel->scheduler, process, context) == PROCESS_SIGNAL_DELIVERY_STOP)
+            if (Scheduler__deliver_pending_signal(kernel->scheduler, thread, context) == PROCESS_SIGNAL_DELIVERY_STOP)
             {
-                Scheduler__yield_waiting(kernel->scheduler, process, CPU__id());
+                Scheduler__yield_waiting(kernel->scheduler, thread, CPU__id());
             }
         },
         none_do_nothing()
@@ -78,15 +79,15 @@ void Exception__install(void)
                      : "memory");
 }
 
-static bool Exception__yield_if_parked(KernelPtr kernel, OptionalPtr(ProcessPtr) current_process)
+static bool Exception__yield_if_parked(KernelPtr kernel, OptionalPtr(ThreadPtr) current_thread)
 {
     match_optional(
-        *current_process,
-        some(process)
+        *current_thread,
+        some(thread)
         {
-            if (Process__is_parked(process))
+            if (Thread__is_parked(thread))
             {
-                Scheduler__yield_waiting(kernel->scheduler, process, CPU__id());
+                Scheduler__yield_waiting(kernel->scheduler, thread, CPU__id());
                 return true;
             }
         },
@@ -95,12 +96,21 @@ static bool Exception__yield_if_parked(KernelPtr kernel, OptionalPtr(ProcessPtr)
     return false;
 }
 
-static void Exception__handle_syscall(ProcessContextPtr context)
+static void Exception__handle_syscall(ThreadContextPtr context)
 {
     KernelPtr kernel = Kernel__instance();
     context->sepc += 4U;
-    Optional(ProcessPtr) current_process =
-        Scheduler__save_context(kernel->scheduler, CPU__id(), &Some(ProcessContextPtr, context));
+    Optional(ThreadPtr) current_thread =
+        Scheduler__save_context(kernel->scheduler, CPU__id(), &Some(ThreadContextPtr, context));
+    Optional(ProcessPtr) current_process = None(ProcessPtr);
+    match_optional(
+        current_thread,
+        some(thread)
+        {
+            current_process = Some(ProcessPtr, thread->owner);
+        },
+        none_do_nothing()
+    );
     match_optional(
         current_process,
         some(process)
@@ -111,21 +121,21 @@ static void Exception__handle_syscall(ProcessContextPtr context)
     );
 
     Result(SystemCallResult) result =
-        SyscallDispatcher__dispatch(&kernel->syscall_dispatcher, kernel, &current_process, context->x[17],
+        SyscallDispatcher__dispatch(&kernel->syscall_dispatcher, kernel, &current_thread, context->x[17],
                                     context->x[10], context->x[11], context->x[12], context->x[13], context->x[14]);
     match_result(
         result,
         success(value)
         {
-            if (!Exception__yield_if_parked(kernel, &current_process))
+            if (!Exception__yield_if_parked(kernel, &current_thread))
             {
                 if (SystemCallResult__restores_context(context->x[17], value))
                 {
                     match_optional(
-                        current_process,
-                        some(process)
+                        current_thread,
+                        some(thread)
                         {
-                            ProcessContext__copy(context, Process__required_context(process));
+                            ThreadContext__copy(context, Thread__required_context(thread));
                         },
                         none_do_nothing()
                     );
@@ -140,7 +150,7 @@ static void Exception__handle_syscall(ProcessContextPtr context)
         },
         error(code, message)
         {
-            if (!Exception__yield_if_parked(kernel, &current_process))
+            if (!Exception__yield_if_parked(kernel, &current_thread))
             {
                 context->x[10] = code;
                 Exception__account_current_process(kernel, CPU_USAGE_USER);
@@ -163,11 +173,20 @@ static ProcessAbortReason Exception__abort_reason(uint64_t cause)
     return PROCESS_ABORT_DATA_ABORT;
 }
 
-static void Exception__abort_user(ProcessContextPtr context, uint64_t cause)
+static void Exception__abort_user(ThreadContextPtr context, uint64_t cause)
 {
     KernelPtr kernel = Kernel__instance();
-    Optional(ProcessPtr) current_process =
-        Scheduler__save_context(kernel->scheduler, CPU__id(), &Some(ProcessContextPtr, context));
+    Optional(ThreadPtr) current_thread =
+        Scheduler__save_context(kernel->scheduler, CPU__id(), &Some(ThreadContextPtr, context));
+    Optional(ProcessPtr) current_process = None(ProcessPtr);
+    match_optional(
+        current_thread,
+        some(thread)
+        {
+            current_process = Some(ProcessPtr, thread->owner);
+        },
+        none_do_nothing()
+    );
     match_optional(
         current_process,
         some(process)
@@ -210,7 +229,7 @@ static uint32_t Exception__user_instruction(Address program_counter)
     return value;
 }
 
-static bool Exception__emulate_mmio_store(ProcessContextPtr context)
+static bool Exception__emulate_mmio_store(ThreadContextPtr context)
 {
     KernelPtr kernel = Kernel__instance();
     match_optional(
@@ -246,7 +265,7 @@ static bool Exception__emulate_mmio_store(ProcessContextPtr context)
     return false;
 }
 
-static bool Exception__emulate_mmio_load(ProcessContextPtr context)
+static bool Exception__emulate_mmio_load(ThreadContextPtr context)
 {
     KernelPtr kernel = Kernel__instance();
     match_optional(
@@ -280,13 +299,13 @@ static bool Exception__emulate_mmio_load(ProcessContextPtr context)
     return false;
 }
 
-static void Exception__dispatch_external(ProcessContextPtr context, bool current_privilege, IRQNumber irq)
+static void Exception__dispatch_external(ThreadContextPtr context, bool current_privilege, IRQNumber irq)
 {
     KernelPtr kernel = Kernel__instance();
     CPUID cpu = CPU__id();
     if (!current_privilege)
     {
-        Scheduler__save_context(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
+        Scheduler__save_context(kernel->scheduler, cpu, &Some(ThreadContextPtr, context));
     }
 
     IRQDispatchContext dispatch_context = IRQDispatchContext__new(irq, cpu, current_privilege, context);
@@ -297,7 +316,7 @@ static void Exception__dispatch_external(ProcessContextPtr context, bool current
             IpcPlatform__signal_event();
             if (!current_privilege && status == IRQ_DISPATCH_RESCHEDULE)
             {
-                Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
+                Scheduler__preempt(kernel->scheduler, cpu, &Some(ThreadContextPtr, context));
             }
         },
         error(code, message)
@@ -307,7 +326,7 @@ static void Exception__dispatch_external(ProcessContextPtr context, bool current
     );
 }
 
-static void Exception__handle_external(ProcessContextPtr context, bool current_privilege)
+static void Exception__handle_external(ThreadContextPtr context, bool current_privilege)
 {
     KernelPtr kernel = Kernel__instance();
     match_optional(
@@ -336,7 +355,7 @@ static void Exception__handle_external(ProcessContextPtr context, bool current_p
     );
 }
 
-void Exception__handle(ProcessContextPtr context)
+void Exception__handle(ThreadContextPtr context)
 {
     bool current_privilege = (context->sstatus & RISCV_SSTATUS_SPP) != 0;
     bool interrupt = (context->scause & RISCV_INTERRUPT_FLAG) != 0;
@@ -371,7 +390,7 @@ void Exception__handle(ProcessContextPtr context)
         __asm__ volatile("csrc sip, %0" : : "r"(1ULL << RISCV_INTERRUPT_SUPERVISOR_SOFTWARE) : "memory");
         if (!current_privilege)
         {
-            Scheduler__preempt(kernel->scheduler, CPU__id(), &Some(ProcessContextPtr, context));
+            Scheduler__preempt(kernel->scheduler, CPU__id(), &Some(ThreadContextPtr, context));
             Exception__account_current_process(kernel, CPU_USAGE_USER);
             Exception__prepare_user_return(kernel, context);
         }

@@ -15,6 +15,7 @@ ProcessForkResult process_fork_abort(uint64_t child_pid);
 void process_set_startup_pid(uint64_t pid);
 uint64_t process_current_pid(void);
 ProcessSignalResult kill_process(int64_t target, ProcessSignal signal);
+ProcessSignalResult terminal_interrupt_group(ProcessGroupID group);
 ProcessSignalResult process_signal_control(ProcessSignalControlRequestPtr request);
 void process_signal_restorer(void) __attribute__((noreturn));
 ProcessChildEventResult wait_for_child_event(ProcessChildEventPtr event);
@@ -22,5 +23,10 @@ ProcessChildEventResult wait_for_child_event_for(int64_t child_selection, uint64
 ProcessTimesResult process_times(ProcessTimesPtr times);
 ProcessGroupResult process_group_control(ProcessGroupRequestPtr request);
 Result(ConstProcessRegistryPtr) process_registry_map(void);
+
+typedef void * (*ThreadStartRoutine)(void * argument);
+ThreadCreateResult thread_create(ThreadStartRoutine start, void * argument);
+Result(ThreadJoinResult) thread_join(ThreadID id);
+void thread_exit(void * result) __attribute__((noreturn));
 
 #endif

@@ -1,0 +1,6 @@
+manifest:
+  include_default_stubs: false
+  include_default_fixtures: false
+  source_files:
+    - user/lib/sys/thread_wait.c
+    - user/lib/sys/user_mutex.c

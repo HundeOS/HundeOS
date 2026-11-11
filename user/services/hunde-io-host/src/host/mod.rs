@@ -181,12 +181,22 @@ fn run_components(
                 Err(error) => mounts.complete(&failed_job, Err(error)),
             }
         }
+        let deadlines = parker.clone();
         let future = core::future::poll_fn(|_| {
             while poll_all(&mut endpoints, Endpoint::poll) {}
+            let now = hunde::runtime::monotonic_usec();
+            let mut worked = false;
+            for worker in &mut workers {
+                let schedule = worker.advance(now);
+                worked |= schedule.worked();
+                if let Some(deadline) = schedule.deadline_usec() {
+                    deadlines.wake_at(deadline);
+                }
+            }
             if poll_all(&mut workers, dispatch::Worker::poll) {
                 return core::task::Poll::Ready(());
             }
-            if mounts.has_jobs() {
+            if worked || mounts.has_jobs() {
                 core::task::Poll::Ready(())
             } else {
                 core::task::Poll::Pending
@@ -257,6 +267,7 @@ mod tests {
         reply: Result<Option<Reply>, IoError>,
         drops: usize,
         reclaims: usize,
+        advanced_at: Option<u64>,
     }
 
     impl State {
@@ -267,6 +278,7 @@ mod tests {
                 reply: Ok(Some(Reply::Value(1))),
                 drops: 0,
                 reclaims: 0,
+                advanced_at: None,
             }
         }
     }
@@ -280,6 +292,10 @@ mod tests {
     }
 
     impl IoComponent for Component {
+        fn advance(&mut self, now_usec: u64) -> hunde::component::Schedule {
+            self.0.borrow_mut().advanced_at = Some(now_usec);
+            hunde::component::Schedule::new(true, Some(now_usec + 50))
+        }
         fn execute(&mut self, request: Request<'_>) -> Result<Option<Reply>, IoError> {
             let mut state = self.0.borrow_mut();
             state.identity = Some((
@@ -310,6 +326,11 @@ mod tests {
     }
 
     fn exercise(subsystem: &mut dyn Subsystem, state: &Rc<RefCell<State>>) {
+        assert_eq!(
+            subsystem.advance(100),
+            hunde::component::Schedule::new(true, Some(150))
+        );
+        assert_eq!(state.borrow().advanced_at, Some(100));
         let mut buffer = [0; 3];
         let request = Request::new(
             SessionId(7),

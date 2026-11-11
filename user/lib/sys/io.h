@@ -7,6 +7,7 @@
 #include "../../common/types/bstring.h"
 #include "../../common/types/dyn_string.h"
 #include "syscalls/io.h"
+#include "syscalls/process.h"
 
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
@@ -17,6 +18,8 @@ Result(IOStatus) IO__set_terminal_foreground(uint64_t pid);
 Optional(BString) IO__terminal_path(int descriptor);
 Result(IOTerminalAttributes) IO__get_terminal_attributes(IOHandle handle);
 Result(IOStatus) IO__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes);
+Result(ProcessGroupID) IO__get_terminal_foreground_group(IOHandle handle);
+Result(IOStatus) IO__set_terminal_foreground_group(IOHandle handle, ProcessGroupID group);
 
 Result(IOHandle) IO__open(ConstBStringPtr path, Flags flags);
 Result(IOPipe) IO__pipe(void);

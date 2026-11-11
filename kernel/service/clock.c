@@ -42,6 +42,6 @@ Result(ServiceCode) KernelClock__map_process(KernelClockPtr self, ProcessPtr pro
         return Error(ServiceCode, clock_page_not_initialized, SERVICE_MAP_FAILED);
     }
 
-    PageTable__map_shared(&process->page_table, process->kernel, self->mapping, CLOCK_PAGE_SIZE);
+    PageTable__map_shared(&process->address_space.page_table, process->kernel, self->mapping, CLOCK_PAGE_SIZE);
     return Success(ServiceCode, SERVICE_OK);
 }

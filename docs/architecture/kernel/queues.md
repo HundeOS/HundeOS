@@ -405,10 +405,9 @@ QEMU verification covers repeated/concurrent clients, real write-permission
 faults on identity and peer-owned pages, and successful clients after fault
 cleanup. Four-core QEMU also passed five server kill/restart cycles, each with
 128 successful round trips before termination, without a kernel panic. This is
-smoke coverage, not an exhaustive SMP race test. The earlier `User exception
-without a current process` panic was not deterministically reproduced; the
-unsafe cross-CPU teardown path identified during investigation has been removed
-from signal delivery.
+smoke coverage, not an exhaustive SMP race test. The earlier panic and the
+unconfirmed relationship to the removed cross-CPU teardown path are tracked in
+[INT-003](../../INTERMITTENT_ISSUES.md#int-003).
 
 ## Process termination and queue teardown
 

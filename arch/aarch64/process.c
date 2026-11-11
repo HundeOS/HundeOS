@@ -14,6 +14,9 @@
 static BString invalid_context_format =
     bstr("Invalid userspace context pid=%i name=%s context=%p elr=%p sp=%p spsr=%p page_table=%p\n");
 
+_Static_assert(offsetof(ThreadContext, thread_pointer) == 0x320, "Thread pointer assembly offset");
+_Static_assert(sizeof(ThreadContext) == 0x330, "Thread context assembly frame size");
+
 /* Build SPSR for entering EL0t.
  *  M[3:0]=0000 (EL0t)
  *  DAIF: 0 = unmask (enable) Debug/SError/IRQ/FIQ on entry
@@ -32,13 +35,13 @@ inline uint64_t Process__spsr_for_el0(unsigned mask_irqs /*bits [9:6]*/)
     return spsr;
 }
 
-ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr stack, UserAddress entry_point,
-                                       KernelAddress page_table, ConstProcessStartupPtr startup)
+ThreadContextPtr ThreadContext__init(KernelPtr kernel, ProcessID pid, StackPtr stack, UserAddress entry_point,
+                                     KernelAddress page_table, ConstProcessStartupPtr startup)
 {
-    KernelAddress context_addr = Kernel__alloc(sizeof(ProcessContext));
-    ProcessContextPtr context = v_ptr(context_addr, ProcessContext);
+    KernelAddress context_addr = Kernel__alloc(sizeof(ThreadContext));
+    ThreadContextPtr context = v_ptr(context_addr, ThreadContext);
 
-    __d_printf(PROCESS, "ProcessContext init context=%p\n", context);
+    __d_printf(PROCESS, "ThreadContext init context=%p\n", context);
 
     context->sp = vaddr(stack->top);
 
@@ -52,6 +55,7 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr
     }
     context->fpcr = 0;
     context->fpsr = 0;
+    context->thread_pointer = 0;
 
     // context->spsr = Process__spsr_for_el0(0);
     context->spsr = 0x0;
@@ -65,57 +69,77 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr
     context->x[7] = startup->exec_payload;
     context->x[8] = vaddr(entry_point);
 
-    __d_printf(PROCESS, "ProcessContext__init done context=%p elr=%p sp=%p x0=%p x1=%p x8=%p page_table=%p\n", context,
+    __d_printf(PROCESS, "ThreadContext__init done context=%p elr=%p sp=%p x0=%p x1=%p x8=%p page_table=%p\n", context,
                context->elr, context->sp, context->x[0], context->x[1], context->x[8], paddr(page_table));
     return context;
 }
 
-void ProcessContext__copy(ProcessContextPtr self, ProcessContextPtr source)
+ThreadContextPtr ThreadContext__init_thread(KernelPtr kernel, StackPtr stack, UserAddress entry_point,
+                                            Address start_function, Anything argument)
+{
+    ProcessStartup startup = ProcessStartup__new(0, 0, 0, 0, 0);
+    ThreadContextPtr context = ThreadContext__init(kernel, 0, stack, entry_point, NULL_KERNEL_ADDRESS, &startup);
+    context->x[0] = start_function;
+    context->x[1] = argument;
+    return context;
+}
+
+void ThreadContext__copy(ThreadContextPtr self, ThreadContextPtr source)
 {
     *self = *source;
 }
 
-void ProcessContext__set_syscall_result(ProcessContextPtr self, SystemCallResult result)
+void ThreadContext__set_syscall_result(ThreadContextPtr self, SystemCallResult result)
 {
     self->x[0] = result;
 }
 
-void ProcessContext__restart_syscall(ProcessContextPtr self)
+void ThreadContext__set_thread_pointer(ThreadContextPtr self, Address thread_pointer)
+{
+    self->thread_pointer = thread_pointer;
+}
+
+Address ThreadContext__thread_pointer(ThreadContextPtr self)
+{
+    return self->thread_pointer;
+}
+
+void ThreadContext__restart_syscall(ThreadContextPtr self)
 {
     self->elr -= sizeof(uint32_t);
 }
 
-ProcessContextPtr ProcessContext__clone(KernelPtr kernel, ProcessContextPtr source)
+ThreadContextPtr ThreadContext__clone(KernelPtr kernel, ThreadContextPtr source)
 {
-    ProcessContextPtr context = v_ptr(Kernel__alloc(sizeof(ProcessContext)), ProcessContext);
-    ProcessContext__copy(context, source);
+    ThreadContextPtr context = v_ptr(Kernel__alloc(sizeof(ThreadContext)), ThreadContext);
+    ThreadContext__copy(context, source);
     return context;
 }
 
-void ProcessContext__enter_signal(ProcessContextPtr self, ProcessSignal signal, Address handler, Address restorer)
+void ThreadContext__enter_signal(ThreadContextPtr self, ProcessSignal signal, Address handler, Address restorer)
 {
     self->x[0] = signal;
     self->x[30] = restorer;
     self->elr = handler;
 }
 
-extern void asm_switch_context(ProcessContextPtr context, Address pagetable);
-extern void asm_switch_kernel_context(ProcessContextPtr context, Address pagetable);
+extern void asm_switch_context(ThreadContextPtr context, Address pagetable, ProcessPtr process);
+extern void asm_switch_kernel_context(ThreadContextPtr context, Address pagetable);
 
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
 {
-    ProcessContext__set_syscall_result(Process__required_context(self), result);
+    ThreadContext__set_syscall_result(Process__required_context(self), result);
 }
 
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)
 {
-    ProcessContextPtr context = Process__required_context(self);
+    ThreadContextPtr context = Process__required_context(self);
     context->x[4] = input;
     context->x[5] = output;
     context->x[6] = error;
 }
 
-void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
+void ThreadContext__assert_user_irqs_unmasked(ThreadContextPtr self)
 {
     uint64_t mode = self->spsr & 0xf;
     uint64_t irq_masked = self->spsr & (1UL << 7);
@@ -130,7 +154,7 @@ void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
     }
 }
 
-static void Process__assert_context_ready(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
+static void Process__assert_context_ready(ProcessPtr self, ThreadContextPtr context, KernelAddress page_table)
 {
     uint64_t mode = context->spsr & 0xf;
 
@@ -142,7 +166,7 @@ static void Process__assert_context_ready(ProcessPtr self, ProcessContextPtr con
     }
 }
 
-__attribute__((noreturn)) void Process__switch_context(ProcessPtr self, ProcessContextPtr context,
+__attribute__((noreturn)) void Process__switch_context(ProcessPtr self, ThreadContextPtr context,
                                                        KernelAddress page_table)
 {
     const char * name = cstr(self->name);
@@ -152,24 +176,25 @@ __attribute__((noreturn)) void Process__switch_context(ProcessPtr self, ProcessC
 
     Address base = addr(context);
     __d_printf(PROCESS_SWITCH,
-               "ProcessContext offsets from context=%p sp=%i x0=%i q0=%i elr=%i spsr=%i fpcr=%i fpsr=%i size=%i\n",
+               "ThreadContext offsets from context=%p sp=%i x0=%i q0=%i elr=%i spsr=%i fpcr=%i fpsr=%i size=%i\n",
                context, (int)(addr(&context->sp) - base), (int)(addr(&context->x) - base),
                (int)(addr(&context->q) - base), (int)(addr(&context->elr) - base), (int)(addr(&context->spsr) - base),
-               (int)(addr(&context->fpcr) - base), (int)(addr(&context->fpsr) - base), (int)sizeof(ProcessContext));
+               (int)(addr(&context->fpcr) - base), (int)(addr(&context->fpsr) - base), (int)sizeof(ThreadContext));
 
     __d_printf(PROCESS_SWITCH,
                "Process__context_switch asm pid=%i name=%s context=%p elr=%p sp=%p x8=%p page_table=%p\n", self->pid,
                name, context, context->elr, context->sp, context->x[8], paddr(page_table));
     Process__assert_context_ready(self, context, page_table);
-    ProcessContext__assert_user_irqs_unmasked(context);
+    ThreadContext__assert_user_irqs_unmasked(context);
     __d_println(PROCESS_SWITCH, "Irqs OK");
-    asm_switch_context(context, paddr(page_table));
+    asm_switch_context(context, paddr(page_table), self);
     __builtin_unreachable();
 }
 
-void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
+void Process__switch_address_space(ProcessPtr self, ThreadContextPtr context, KernelAddress page_table)
 {
     asm_switch_kernel_context(context, paddr(page_table));
+    Process__address_space_switched(self);
 }
 
 uint16_t Arch__elf_machine(void)

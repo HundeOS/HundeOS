@@ -4,8 +4,9 @@
 
 static BString panic_returned = bstr("Panic returned unexpectedly");
 
-Result(SystemCallResult) Panic__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
-                                        Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    Panic__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                   Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     Kernel__panic("panic syscall requested", NULL);
     return Error(SystemCallResult, panic_returned, SYSCALL_FAILURE);

@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <string.h>
+#include <unistd.h>
 #include "include/sys/ioctl.h"
 #include "include/termios.h"
 
@@ -123,6 +124,55 @@ int tcsetattr(int descriptor, int action, const struct termios * attributes)
         success(status)
         {
             return status == IO_OK ? 0 : -1;
+        },
+        error(code, message)
+        {
+            return PosixTerminal__error((IOStatus)code);
+        }
+    );
+    errno = EIO;
+    return -1;
+}
+
+pid_t tcgetpgrp(int descriptor)
+{
+    IOHandle handle = PosixTerminal__handle(descriptor);
+    if (handle < 0)
+    {
+        return -1;
+    }
+    match_result(
+        IO__get_terminal_foreground_group(handle),
+        success(group)
+        {
+            return (pid_t)group;
+        },
+        error(code, message)
+        {
+            return PosixTerminal__error((IOStatus)code);
+        }
+    );
+    errno = EIO;
+    return -1;
+}
+
+int tcsetpgrp(int descriptor, pid_t process_group_id)
+{
+    if (process_group_id <= 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    IOHandle handle = PosixTerminal__handle(descriptor);
+    if (handle < 0)
+    {
+        return -1;
+    }
+    match_result(
+        IO__set_terminal_foreground_group(handle, (ProcessGroupID)process_group_id),
+        success(status)
+        {
+            return status == IO_OK ? 0 : PosixTerminal__error(status);
         },
         error(code, message)
         {

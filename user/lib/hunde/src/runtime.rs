@@ -129,6 +129,11 @@ pub fn log(message: &[u8]) {
     unsafe { crate::abi::host::hunde_rust_log(ByteSpan::new(message)) };
 }
 
+#[cfg(feature = "alloc")]
+pub fn monotonic_usec() -> u64 {
+    unsafe { crate::abi::host::hunde_rust_monotonic_usec() }
+}
+
 #[macro_export]
 macro_rules! executable {
     ($entry:path, $message:expr) => {

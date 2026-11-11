@@ -444,6 +444,18 @@ void test_terminal_attributes_and_foreground_use_bounded_component_fields(void)
         },
         none_test_fail()
     );
+
+    request.operation = IO_REQUEST_SET_FOREGROUND_GROUP;
+    request.offset = 65;
+    match_optional(
+        RustIOCallbacks__execute(&component, 123, 456, &request),
+        some(reply)
+        {
+            TEST_ASSERT_EQUAL(IO_OK, reply.status);
+            TEST_ASSERT_EQUAL_UINT64(65, observed_offset);
+        },
+        none_test_fail()
+    );
 }
 
 void test_link_paths_are_bounded_packed_and_authenticated(void)

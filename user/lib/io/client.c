@@ -852,6 +852,19 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
     return IOClient__submit_handle(handle, &request).status;
 }
 
+IOReply IOClient__get_foreground_group(IOHandle handle)
+{
+    IORequest request = IORequest__new(IO_REQUEST_GET_FOREGROUND_GROUP, handle);
+    return IOClient__submit_handle(handle, &request);
+}
+
+IOStatus IOClient__set_foreground_group(IOHandle handle, uint64_t group)
+{
+    IORequest request = IORequest__new(IO_REQUEST_SET_FOREGROUND_GROUP, handle);
+    request.offset = group;
+    return IOClient__submit_handle(handle, &request).status;
+}
+
 IOTerminalAttributesResult IOClient__get_terminal_attributes(IOHandle handle)
 {
     IORequest request = IORequest__new(IO_REQUEST_GET_TERMINAL_ATTRIBUTES, handle);

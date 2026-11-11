@@ -1,4 +1,4 @@
-use crate::abi::{ByteSpan, IoError, StatusResult, host::NativeLayout};
+use crate::abi::{IoError, StatusResult, host::NativeLayout};
 use crate::native::Storage;
 use crate::protocol::*;
 use alloc::rc::Rc;
@@ -109,12 +109,6 @@ impl Response {
 }
 
 #[repr(C)]
-struct NativeValue {
-    status: StatusResult,
-    value: u64,
-}
-
-#[repr(C)]
 struct NativeEvent {
     status: StatusResult,
     irq: u64,
@@ -188,28 +182,7 @@ impl Manager {
     }
 }
 
-pub struct Listener {
-    storage: Storage,
-}
-
-impl Listener {
-    pub fn publish_ready(&self, name: &[u8]) -> Result<(), IoError> {
-        unsafe { crate::abi::host::hunde_rust_publish_ready(ByteSpan::new(name)) }.into_result()
-    }
-    pub fn listen(name: &[u8]) -> Result<Self, IoError> {
-        let storage = Storage::new(unsafe { hunde_driver_listener_layout() })?;
-        unsafe { hunde_driver_listen(storage.as_ptr(), ByteSpan::new(name)) }.into_result()?;
-        Ok(Self { storage })
-    }
-    pub fn connections(&self) -> impl Iterator<Item = u64> + '_ {
-        (0..)
-            .map_while(|index| {
-                let result = unsafe { hunde_driver_arrival(self.storage.as_ptr(), index) };
-                (result.status.kind == crate::abi::SUCCESS).then_some(result.value)
-            })
-            .filter(|connection| *connection != 0)
-    }
-}
+pub use crate::channel::Listener;
 
 pub struct Client {
     storage: Storage,
@@ -218,8 +191,8 @@ pub struct Client {
 
 impl Client {
     pub fn accept(connection: u64) -> Result<Self, IoError> {
-        let storage = Storage::new(unsafe { hunde_driver_client_layout() })?;
-        unsafe { hunde_driver_accept(storage.as_ptr(), connection) }.into_result()?;
+        let storage = Storage::new(unsafe { hunde_channel_server_layout() })?;
+        unsafe { hunde_channel_accept(storage.as_ptr(), connection) }.into_result()?;
         Ok(Self {
             storage,
             connection,
@@ -267,7 +240,6 @@ pub fn wait_ticks(ticks: u64) {
 }
 
 const _: () = {
-    assert!(core::mem::size_of::<NativeValue>() == 40);
     assert!(core::mem::size_of::<NativeEvent>() == 64);
     assert!(core::mem::size_of::<NativeRequest>() == 64);
 };
@@ -279,11 +251,8 @@ unsafe extern "C" {
     fn hunde_driver_route_self(storage: *mut c_void, irq: u64) -> StatusResult;
     fn hunde_driver_rearm(storage: *mut c_void, irq: u64) -> StatusResult;
     fn hunde_driver_event(storage: *mut c_void) -> NativeEvent;
-    fn hunde_driver_listener_layout() -> NativeLayout;
-    fn hunde_driver_listen(storage: *mut c_void, name: ByteSpan) -> StatusResult;
-    fn hunde_driver_arrival(storage: *mut c_void, index: u64) -> NativeValue;
-    fn hunde_driver_client_layout() -> NativeLayout;
-    fn hunde_driver_accept(storage: *mut c_void, connection: u64) -> StatusResult;
+    fn hunde_channel_server_layout() -> NativeLayout;
+    fn hunde_channel_accept(storage: *mut c_void, connection: u64) -> StatusResult;
     fn hunde_driver_client_pid(storage: *mut c_void) -> u64;
     fn hunde_driver_request(storage: *mut c_void) -> NativeRequest;
     fn hunde_driver_reply(

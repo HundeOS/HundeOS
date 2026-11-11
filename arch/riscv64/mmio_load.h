@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../../kernel/arch/process_context.h"
+#include "../../kernel/arch/thread_context.h"
 #include "../../kernel/types/optional.h"
 #include "process.h"
 
@@ -35,7 +35,7 @@ static inline RiscVMMIOLoad RiscVMMIOLoad__new(Address address, uint32_t destina
     };
 }
 
-Optional(RiscVMMIOLoad) RiscVMMIOLoad__decode(uint32_t instruction, ProcessContextPtr context);
-void RiscVMMIOLoad__perform(ConstRiscVMMIOLoadPtr self, Address access_address, ProcessContextPtr context);
+Optional(RiscVMMIOLoad) RiscVMMIOLoad__decode(uint32_t instruction, ThreadContextPtr context);
+void RiscVMMIOLoad__perform(ConstRiscVMMIOLoadPtr self, Address access_address, ThreadContextPtr context);
 
 #endif

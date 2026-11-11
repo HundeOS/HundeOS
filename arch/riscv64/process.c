@@ -17,13 +17,13 @@
 static BString invalid_context_format =
     bstr("Invalid RV64 userspace context pid=%i name=%s context=%p sepc=%p sp=%p sstatus=%p page_table=%p\n");
 
-extern void RiscVProcess__switch_context(ProcessContextPtr context, Address page_table);
+extern void RiscVProcess__switch_context(ThreadContextPtr context, Address page_table, ProcessPtr process);
 extern void RiscVProcess__switch_address_space(Address page_table);
 
-ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr stack, UserAddress entry_point,
-                                       KernelAddress page_table, ConstProcessStartupPtr startup)
+ThreadContextPtr ThreadContext__init(KernelPtr kernel, ProcessID pid, StackPtr stack, UserAddress entry_point,
+                                     KernelAddress page_table, ConstProcessStartupPtr startup)
 {
-    ProcessContextPtr context = v_ptr(Kernel__alloc(sizeof(ProcessContext)), ProcessContext);
+    ThreadContextPtr context = v_ptr(Kernel__alloc(sizeof(ThreadContext)), ThreadContext);
     for (uint64_t index = 0; index < 32; index++)
     {
         context->x[index] = 0;
@@ -45,29 +45,49 @@ ProcessContextPtr ProcessContext__init(KernelPtr kernel, ProcessID pid, StackPtr
     return context;
 }
 
-void ProcessContext__copy(ProcessContextPtr self, ProcessContextPtr source)
+ThreadContextPtr ThreadContext__init_thread(KernelPtr kernel, StackPtr stack, UserAddress entry_point,
+                                            Address start_function, Anything argument)
+{
+    ProcessStartup startup = ProcessStartup__new(0, 0, 0, 0, 0);
+    ThreadContextPtr context = ThreadContext__init(kernel, 0, stack, entry_point, NULL_KERNEL_ADDRESS, &startup);
+    context->x[10] = start_function;
+    context->x[11] = argument;
+    return context;
+}
+
+void ThreadContext__copy(ThreadContextPtr self, ThreadContextPtr source)
 {
     *self = *source;
 }
 
-void ProcessContext__set_syscall_result(ProcessContextPtr self, SystemCallResult result)
+void ThreadContext__set_syscall_result(ThreadContextPtr self, SystemCallResult result)
 {
     self->x[10] = result;
 }
 
-void ProcessContext__restart_syscall(ProcessContextPtr self)
+void ThreadContext__set_thread_pointer(ThreadContextPtr self, Address thread_pointer)
+{
+    self->x[4] = thread_pointer;
+}
+
+Address ThreadContext__thread_pointer(ThreadContextPtr self)
+{
+    return self->x[4];
+}
+
+void ThreadContext__restart_syscall(ThreadContextPtr self)
 {
     self->sepc -= sizeof(uint32_t);
 }
 
-ProcessContextPtr ProcessContext__clone(KernelPtr kernel, ProcessContextPtr source)
+ThreadContextPtr ThreadContext__clone(KernelPtr kernel, ThreadContextPtr source)
 {
-    ProcessContextPtr context = v_ptr(Kernel__alloc(sizeof(ProcessContext)), ProcessContext);
-    ProcessContext__copy(context, source);
+    ThreadContextPtr context = v_ptr(Kernel__alloc(sizeof(ThreadContext)), ThreadContext);
+    ThreadContext__copy(context, source);
     return context;
 }
 
-void ProcessContext__enter_signal(ProcessContextPtr self, ProcessSignal signal, Address handler, Address restorer)
+void ThreadContext__enter_signal(ThreadContextPtr self, ProcessSignal signal, Address handler, Address restorer)
 {
     self->x[10] = signal;
     self->x[1] = restorer;
@@ -76,18 +96,18 @@ void ProcessContext__enter_signal(ProcessContextPtr self, ProcessSignal signal, 
 
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
 {
-    ProcessContext__set_syscall_result(Process__required_context(self), result);
+    ThreadContext__set_syscall_result(Process__required_context(self), result);
 }
 
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)
 {
-    ProcessContextPtr context = Process__required_context(self);
+    ThreadContextPtr context = Process__required_context(self);
     context->x[14] = input;
     context->x[15] = output;
     context->x[16] = error;
 }
 
-void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
+void ThreadContext__assert_user_irqs_unmasked(ThreadContextPtr self)
 {
     if ((self->sstatus & RISCV_SSTATUS_SPP) != 0 || (self->sstatus & RISCV_SSTATUS_SPIE) == 0)
     {
@@ -95,7 +115,7 @@ void ProcessContext__assert_user_irqs_unmasked(ProcessContextPtr self)
     }
 }
 
-static void Process__assert_context_ready(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
+static void Process__assert_context_ready(ProcessPtr self, ThreadContextPtr context, KernelAddress page_table)
 {
     if (context->sepc == 0 || context->x[2] == 0 || (context->sstatus & RISCV_SSTATUS_SPP) != 0)
     {
@@ -105,18 +125,19 @@ static void Process__assert_context_ready(ProcessPtr self, ProcessContextPtr con
     }
 }
 
-__attribute__((noreturn)) void Process__switch_context(ProcessPtr self, ProcessContextPtr context,
+__attribute__((noreturn)) void Process__switch_context(ProcessPtr self, ThreadContextPtr context,
                                                        KernelAddress page_table)
 {
     Process__assert_context_ready(self, context, page_table);
-    ProcessContext__assert_user_irqs_unmasked(context);
-    RiscVProcess__switch_context(context, paddr(page_table));
+    ThreadContext__assert_user_irqs_unmasked(context);
+    RiscVProcess__switch_context(context, paddr(page_table), self);
     __builtin_unreachable();
 }
 
-void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
+void Process__switch_address_space(ProcessPtr self, ThreadContextPtr context, KernelAddress page_table)
 {
     RiscVProcess__switch_address_space(paddr(page_table));
+    Process__address_space_switched(self);
 }
 
 uint16_t Arch__elf_machine(void)

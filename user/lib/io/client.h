@@ -42,6 +42,8 @@ IOReply IOClient__seek(IOHandle handle, int64_t offset, IOSeekWhence whence);
 IOReply IOClient__watch_file(IOHandle handle);
 IOReply IOClient__wait_file_change(IOFileWatch * watches, size_t count);
 IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid);
+IOReply IOClient__get_foreground_group(IOHandle handle);
+IOStatus IOClient__set_foreground_group(IOHandle handle, uint64_t group);
 IOTerminalAttributesResult IOClient__get_terminal_attributes(IOHandle handle);
 IOStatus IOClient__set_terminal_attributes(IOHandle handle, IOTerminalAttributes attributes);
 IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset);

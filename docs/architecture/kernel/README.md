@@ -8,6 +8,7 @@ interrupt-controller, timer, and bootstrap code lives in `arch/<target>/`.
 | --- | --- | --- |
 | Process creation and memory copying | [Fork and COW](fork.md) | `kernel/process.c`, `arch/<target>/process.c` |
 | Process image replacement | [Exec](exec.md) | `kernel/process.c`, `kernel/syscall/` |
+| Userspace execution contexts | [Threads](threads.md) | `kernel/process.c`, `kernel/scheduler/` |
 | Protected IPC and event interfaces | [Channels and events](channels-and-event-queues.md) | `common/ipc/`, `kernel/ipc/` |
 | IPC mappings, lifetime, and waits | [Queues](queues.md) | `kernel/ipc/queues.c`, `kernel/syscall/service_handler.c` |
 | Request-chain scheduling | [Channel tickets and scheduling](dependency-scheduling.md) | `kernel/scheduler/` |

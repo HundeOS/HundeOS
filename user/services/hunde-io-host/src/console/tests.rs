@@ -207,7 +207,7 @@ fn terminal_attributes_and_foreground_state_belong_to_the_console() {
     let reader = open(&mut console, IO_OPEN_READ);
     let writer = open(&mut console, IO_OPEN_WRITE);
     let mut attributes = Attributes::new();
-    attributes.local_flags = 0;
+    attributes.local_flags = IO_TERMINAL_LOCAL_SIGNALS as u32;
     call(
         &mut console,
         1,
@@ -234,11 +234,72 @@ fn terminal_attributes_and_foreground_state_belong_to_the_console() {
         Operation::SetForegroundProcess(ProcessId(7)),
     )
     .unwrap();
-    assert_eq!(console.input.borrow_mut().receive(3), Some(ProcessId(7)));
+    assert_eq!(
+        console.input.borrow_mut().receive(3),
+        Some(Foreground::Process(ProcessId(7)))
+    );
     assert!(console.input.borrow().bytes.is_empty());
     console.disconnect(SessionId(1)).unwrap();
     assert_eq!(console.input.borrow_mut().receive(3), None);
     assert_eq!(console.input.borrow().bytes.front(), Some(&3));
+}
+
+#[test]
+fn foreground_group_is_shared_between_output_and_input_handles() {
+    let mut console = console();
+    let reader = open(&mut console, IO_OPEN_READ);
+    let writer = open(&mut console, IO_OPEN_WRITE);
+    assert_eq!(
+        call(
+            &mut console,
+            1,
+            2,
+            writer,
+            Operation::SetForegroundGroup(ProcessGroupId(43)),
+        ),
+        Ok(Some(Reply::Value(0)))
+    );
+    assert_eq!(
+        call(&mut console, 1, 2, reader, Operation::GetForegroundGroup),
+        Ok(Some(Reply::Value(43)))
+    );
+    assert_eq!(
+        console.input.borrow_mut().receive(3),
+        Some(Foreground::Group(ProcessGroupId(43)))
+    );
+    assert!(console.input.borrow().bytes.is_empty());
+    console.disconnect(SessionId(1)).unwrap();
+    assert_eq!(console.input.borrow_mut().receive(3), None);
+}
+
+#[test]
+fn foreground_group_interrupt_completes_the_next_terminal_read() {
+    let mut console = console();
+    let reader = open(&mut console, IO_OPEN_READ);
+    call(
+        &mut console,
+        1,
+        2,
+        reader,
+        Operation::SetForegroundGroup(ProcessGroupId(2)),
+    )
+    .unwrap();
+    console.input.borrow_mut().receive(b'x');
+    assert_eq!(
+        console.input.borrow_mut().receive(3),
+        Some(Foreground::Group(ProcessGroupId(2)))
+    );
+    assert!(console.input.borrow().bytes.is_empty());
+    console.input.borrow_mut().interrupted_group = Some(ProcessGroupId(2));
+    assert_eq!(
+        call(&mut console, 1, 2, reader, Operation::Read(&mut [0])),
+        Err(IoError(IO_INTERRUPTED))
+    );
+    assert_eq!(console.input.borrow().interrupted_group, None);
+    assert_eq!(
+        call(&mut console, 1, 2, reader, Operation::Read(&mut [0])),
+        Ok(None)
+    );
 }
 
 #[test]

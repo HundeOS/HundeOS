@@ -36,19 +36,19 @@ typedef struct IRQDispatchContext
     IRQNumber irq;
     CPUID cpu;
     bool current_el;
-    ProcessContextPtr process_context;
+    ThreadContextPtr thread_context;
 } IRQDispatchContext;
 
 typedef IRQDispatchContext * IRQDispatchContextPtr;
 
 static inline IRQDispatchContext IRQDispatchContext__new(IRQNumber irq, CPUID cpu, bool current_el,
-                                                         ProcessContextPtr process_context)
+                                                         ThreadContextPtr thread_context)
 {
     return (IRQDispatchContext){
         .irq = irq,
         .cpu = cpu,
         .current_el = current_el,
-        .process_context = process_context,
+        .thread_context = thread_context,
     };
 }
 

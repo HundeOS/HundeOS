@@ -67,7 +67,16 @@ def protocol_root(tmp_path):
         encoding="utf-8",
     )
     protocol.with_name("buffer.h").write_text(
-        "typedef enum BufferDirection { BUFFER_READ = 1, BUFFER_WRITE = 2 } BufferDirection;\n",
+        "typedef enum BufferDirection { BUFFER_READ = 1, BUFFER_WRITE = 2 } BufferDirection;\n"
+        "typedef enum BufferOperation { BUFFER_ACQUIRE = 1, BUFFER_RELEASE, BUFFER_RELEASE_PAIR } BufferOperation;\n"
+        "typedef enum BufferStatus { BUFFER_OK = 0, BUFFER_INVALID = -1 } BufferStatus;\n",
+        encoding="utf-8",
+    )
+    protocol.with_name("packet_protocol.h").write_text(
+        "typedef enum PacketProtocolVersion { PACKET_PROTOCOL_VERSION = 1 } PacketProtocolVersion;\n"
+        "typedef enum PacketProtocolOperation { PACKET_OPEN_RX = 1, PACKET_OPEN_TX, PACKET_TRANSMIT, PACKET_RECEIVE, PACKET_CLOSE } PacketProtocolOperation;\n"
+        "typedef enum PacketProtocolStatus { PACKET_OK = 0, PACKET_INVALID = -1 } PacketProtocolStatus;\n"
+        "typedef enum PacketProtocolLimit { PACKET_FRAME_CAPACITY = 1514 } PacketProtocolLimit;\n",
         encoding="utf-8",
     )
     hardware = tmp_path / "common/hardware/boot_info.h"
@@ -158,7 +167,7 @@ def test_all_generated_repository_constants_equal_the_c_compilers_values(tmp_pat
         suffix = {"u32": "U", "u64": "ULL", "i32": ""}[rust_type]
         assertions.append(f'_Static_assert(({name}) == ({value}{suffix}), "{name}");')
     source = tmp_path / "protocol_values.c"
-    source.write_text('#include "common/ipc/io_protocol.h"\n#include "common/ipc/interrupt_protocol.h"\n#include "common/hardware/boot_info.h"\n#include "common_includes/hunde/io_component.h"\n#include "common_includes/syscalls/service.h"\n#include "common_includes/syscalls/mem.h"\n' + "\n".join(assertions), encoding="utf-8")
+    source.write_text('#include "common/ipc/io_protocol.h"\n#include "common/ipc/interrupt_protocol.h"\n#include "common/ipc/packet_protocol.h"\n#include "common/hardware/boot_info.h"\n#include "common_includes/hunde/io_component.h"\n#include "common_includes/syscalls/service.h"\n#include "common_includes/syscalls/mem.h"\n' + "\n".join(assertions), encoding="utf-8")
     result = subprocess.run(
         ["cc", "-std=gnu11", "-fsyntax-only", "-I", str(PROJECT_ROOT),
          "-I", str(PROJECT_ROOT / "common"), "-I", str(PROJECT_ROOT / "common_includes"),
@@ -179,6 +188,7 @@ def test_all_generated_repository_constants_equal_the_c_compilers_values(tmp_pat
         ("common_includes/hunde/io_component.h", "6U", "7U", "pub const HUNDE_IO_COMPONENT_VERSION: u64 = 7;"),
         ("common/ipc/interrupt_protocol.h", "INTERRUPT_PROTOCOL_SUBSCRIBE = 1", "INTERRUPT_PROTOCOL_SUBSCRIBE = 7", "pub const INTERRUPT_PROTOCOL_WAIT: u32 = 8;"),
         ("common/hardware/boot_info.h", "UART_KIND_UNKNOWN = 0", "UART_KIND_UNKNOWN = 4", "pub const UART_KIND_NS16550: u64 = 6;"),
+        ("common/ipc/packet_protocol.h", "PACKET_OPEN_RX = 1", "PACKET_OPEN_RX = 7", "pub const PACKET_OPEN_TX: u32 = 8;"),
     ],
 )
 def test_cargo_regenerates_constants_after_a_c_header_change(protocol_root, header_path, original, replacement, expected):

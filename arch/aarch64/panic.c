@@ -13,7 +13,7 @@ void Kernel__halt()
     }
 }
 
-void Kernel__dump_state(ProcessContextPtr ctx)
+void Kernel__dump_state(ThreadContextPtr ctx)
 {
     ExceptionSyndrome syndrome = read_esr_el1();
 
@@ -60,7 +60,7 @@ void Kernel__dump_state(ProcessContextPtr ctx)
     }
 }
 
-void Kernel__dump_context(ProcessContextPtr ctx)
+void Kernel__dump_context(ThreadContextPtr ctx)
 {
     __d_printf(FAULT, "Context: %p\n", ctx);
     __d_printf(FAULT, "PC: %p\n", ctx->elr);

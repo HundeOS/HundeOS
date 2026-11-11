@@ -52,7 +52,7 @@ void test_irq_dispatcher_returns_unhandled_when_no_consumer_registered(void)
         .irq = 48,
         .cpu = 0,
         .current_el = false,
-        .process_context = NULL,
+        .thread_context = NULL,
     };
 
     match_result(
@@ -71,7 +71,7 @@ void test_irq_dispatcher_calls_registered_kernel_consumer(void)
         .irq = 27,
         .cpu = 2,
         .current_el = false,
-        .process_context = NULL,
+        .thread_context = NULL,
     };
 
     match_result(
@@ -101,13 +101,13 @@ void test_irq_dispatcher_calls_registered_kernel_consumer(void)
 void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
 
     IRQDispatchContext context = (IRQDispatchContext){
         .irq = 48,
         .cpu = 0,
         .current_el = false,
-        .process_context = NULL,
+        .thread_context = NULL,
     };
 
     match_result(
@@ -136,7 +136,7 @@ void test_irq_dispatcher_registers_service_consumer_enables_irq_and_queues_event
 
     ServiceEvent event = (ServiceEvent){0};
     KernelContext kernel_context =
-        KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
+        KernelContext__new(&Some(ThreadPtr, &process->thread), &Some(SchedulerPtr, kernel->scheduler));
     match_result(
         Scheduler__service_wait(kernel->scheduler, process, &kernel_context, &None(Continuation)),
         success(wait_event)
@@ -156,7 +156,7 @@ void test_irq_dispatcher_rejects_duplicate_kernel_registration(void)
         .irq = 27,
         .cpu = 0,
         .current_el = false,
-        .process_context = NULL,
+        .thread_context = NULL,
     };
 
     match_result(
@@ -192,9 +192,9 @@ void test_irq_dispatcher_rejects_duplicate_kernel_registration(void)
 void test_irq_dispatcher_rejects_duplicate_service_registration(void)
 {
     ProcessPtr first_process = dummy_process(1, 0, PROC_STATE_READY);
-    first_process->process_class = PROCESS_CLASS_SERVICE;
+    first_process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ProcessPtr second_process = dummy_process(2, 0, PROC_STATE_READY);
-    second_process->process_class = PROCESS_CLASS_SERVICE;
+    second_process->scheduling.process_class = PROCESS_CLASS_SERVICE;
 
     match_result(
         IRQDispatcher__register_service(kernel->irq_dispatcher, 48, first_process),
@@ -220,7 +220,7 @@ void test_irq_dispatcher_rejects_duplicate_service_registration(void)
 void test_irq_dispatcher_rejects_service_registration_when_kernel_consumer_exists(void)
 {
     ProcessPtr process = dummy_process(1, 0, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
 
     match_result(
         IRQDispatcher__register_kernel(kernel->irq_dispatcher, 48, kernel_consumer, kernel),
@@ -246,9 +246,9 @@ void test_irq_dispatcher_rejects_service_registration_when_kernel_consumer_exist
 void test_irq_dispatcher_dispose_process_resources_unregisters_service_consumer(void)
 {
     ProcessPtr first_process = dummy_process(1, 0, PROC_STATE_READY);
-    first_process->process_class = PROCESS_CLASS_SERVICE;
+    first_process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ProcessPtr second_process = dummy_process(2, 0, PROC_STATE_READY);
-    second_process->process_class = PROCESS_CLASS_SERVICE;
+    second_process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     IRQNumber irq = 48;
 
     match_result(
@@ -287,7 +287,7 @@ void test_irq_dispatcher_dispose_process_resources_unregisters_service_consumer(
 void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
 {
     ProcessPtr manager = dummy_process(1, 0, PROC_STATE_READY);
-    manager->process_class = PROCESS_CLASS_SERVICE;
+    manager->scheduling.process_class = PROCESS_CLASS_SERVICE;
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, manager, 0),
         success_do_nothing(),
         error_test_fail()
@@ -311,7 +311,7 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
         error_test_fail()
     );
     match_result(
-        Scheduler__queue_wait(kernel->scheduler, manager,
+        Scheduler__queue_wait(kernel->scheduler, &manager->thread,
                               IpcEvent__generation(IpcDoorbell__event(
                                   k_v_ptr(unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
                               QUEUE_WAIT_INDEFINITE_TICKS),
@@ -333,7 +333,7 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
     );
 
     TEST_ASSERT_EQUAL_UINT64(48, Arch__masked_irq());
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->thread.state);
     TEST_ASSERT_EQUAL_UINT64(0, CPUStub__reschedule_count());
     TEST_ASSERT_TRUE(IRQDispatcher__has_pending_notifications(kernel->irq_dispatcher, manager));
     ProcessPtr other = dummy_process(2, 0, PROC_STATE_READY);
@@ -363,7 +363,7 @@ void test_irq_dispatcher_publishes_managed_irq_to_manager_queue(void)
 void test_irq_dispatcher_does_not_poke_current_cpu_from_kernel_el(void)
 {
     ProcessPtr manager = dummy_process(1, 0, PROC_STATE_READY);
-    manager->process_class = PROCESS_CLASS_SERVICE;
+    manager->scheduling.process_class = PROCESS_CLASS_SERVICE;
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, manager, 0),
         success_do_nothing(),
         error_test_fail()
@@ -377,7 +377,7 @@ void test_irq_dispatcher_does_not_poke_current_cpu_from_kernel_el(void)
                  error_test_fail()
     );
     match_result(
-        Scheduler__queue_wait(kernel->scheduler, manager,
+        Scheduler__queue_wait(kernel->scheduler, &manager->thread,
                               IpcEvent__generation(IpcDoorbell__event(
                                   k_v_ptr(unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
                               QUEUE_WAIT_INDEFINITE_TICKS),
@@ -398,7 +398,7 @@ void test_irq_dispatcher_does_not_poke_current_cpu_from_kernel_el(void)
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->thread.state);
     TEST_ASSERT_EQUAL_UINT64(0, CPUStub__reschedule_count());
 }
 
@@ -406,7 +406,7 @@ void test_irq_dispatcher_pokes_remote_cpu_for_parked_interrupt_manager(void)
 {
     CPUID manager_cpu = 1;
     ProcessPtr manager = dummy_process(1, manager_cpu, PROC_STATE_READY);
-    manager->process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    manager->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
     Scheduler__start(kernel->scheduler, manager_cpu);
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, manager, manager_cpu),
         success_do_nothing(),
@@ -421,7 +421,7 @@ void test_irq_dispatcher_pokes_remote_cpu_for_parked_interrupt_manager(void)
                  error_test_fail()
     );
     match_result(
-        Scheduler__queue_wait(kernel->scheduler, manager,
+        Scheduler__queue_wait(kernel->scheduler, &manager->thread,
                               IpcEvent__generation(IpcDoorbell__event(
                                   k_v_ptr(unwrap_result(Process__doorbell(manager), NULL_USER_ADDRESS), IpcDoorbell))),
                               QUEUE_WAIT_INDEFINITE_TICKS),
@@ -442,7 +442,7 @@ void test_irq_dispatcher_pokes_remote_cpu_for_parked_interrupt_manager(void)
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, manager->thread.state);
     TEST_ASSERT_EQUAL_UINT64(1, CPUStub__reschedule_count());
     TEST_ASSERT_EQUAL_UINT64(manager_cpu, CPUStub__rescheduled_cpu());
 }

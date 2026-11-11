@@ -1,6 +1,7 @@
 #include "../../user.h"
 #include "sys/auth.h"
 #include "sys/spawn.h"
+#include <unistd.h>
 
 #ifndef LOGIN_ENTRYPOINT
 #define LOGIN_ENTRYPOINT main
@@ -8,6 +9,11 @@
 
 int LOGIN_ENTRYPOINT(void)
 {
+    if (setsid() < 0 || tcsetpgrp(STDIN_FILENO, getpgrp()) < 0)
+    {
+        IO__print(&bstr("login: cannot establish terminal session\n"));
+        return 1;
+    }
     while (true)
     {
         IO__printf(&bstr("login: "));

@@ -162,6 +162,8 @@ removing source files.
   [userspace services and drivers](docs/architecture/userspace/README.md) guides.
 - [Goals](docs/GOALS.md) and [TODO](docs/TODO.md): project direction, remaining
   work, and open design questions.
+- [Intermittent issues](docs/INTERMITTENT_ISSUES.md): runtime failure evidence,
+  investigation status, and validation gaps.
 - [Userspace I/O](docs/architecture/userspace/io-system.md): service ownership, mounts,
   filesystem and stream protocols.
 - [I/O and driver hosts](docs/architecture/userspace/io-driver-hosts.md),

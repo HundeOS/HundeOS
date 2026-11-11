@@ -142,8 +142,9 @@ Result(UserID) Auth__consume_ticket(AuthPtr self, ProcessPtr process, AuthTicket
     return auth_result;
 }
 
-Result(SystemCallResult) Auth__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
-                                       Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    Auth__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                  Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (arg1 == 0)
     {

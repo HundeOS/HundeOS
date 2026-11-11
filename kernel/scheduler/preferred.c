@@ -4,7 +4,7 @@
 
 static bool Process__schedulable(ProcessPtr self)
 {
-    return self->state == PROC_STATE_READY || self->state == PROC_STATE_INTERRUPTED;
+    return self->thread.state == PROC_STATE_READY || self->thread.state == PROC_STATE_INTERRUPTED;
 }
 
 static bool Process__has_ready_exec_continuation(ProcessPtr self)
@@ -28,21 +28,21 @@ static int Process__preferred_priority(ProcessPtr * first, ProcessPtr * second)
         return first_pending ? 1 : -1;
     }
 
-    if ((*first)->preferred_dependency_weight != (*second)->preferred_dependency_weight)
+    if ((*first)->thread.preferred_dependency_weight != (*second)->thread.preferred_dependency_weight)
     {
-        return (*first)->preferred_dependency_weight > (*second)->preferred_dependency_weight ? 1 : -1;
+        return (*first)->thread.preferred_dependency_weight > (*second)->thread.preferred_dependency_weight ? 1 : -1;
     }
 
-    uint64_t first_priority = ProcessClass__priority((*first)->process_class);
-    uint64_t second_priority = ProcessClass__priority((*second)->process_class);
+    ProcessPriority first_priority = ProcessClass__priority((*first)->scheduling.process_class);
+    ProcessPriority second_priority = ProcessClass__priority((*second)->scheduling.process_class);
     if (first_priority != second_priority)
     {
         return first_priority > second_priority ? 1 : -1;
     }
 
-    if ((*first)->last_tick != (*second)->last_tick)
+    if ((*first)->thread.last_tick != (*second)->thread.last_tick)
     {
-        return (*first)->last_tick < (*second)->last_tick ? 1 : -1;
+        return (*first)->thread.last_tick < (*second)->thread.last_tick ? 1 : -1;
     }
     if ((*first)->pid == (*second)->pid)
     {
@@ -55,7 +55,7 @@ static void Process__observe_preferred_ticket(ProcessPtr self, ConstRequestTicke
 {
     bool already_observed = false;
     match_optional(
-        self->preferred_ticket,
+        self->thread.preferred_ticket,
         some(current)
         {
             already_observed = RequestTicket__equals(&current, ticket);
@@ -66,11 +66,11 @@ static void Process__observe_preferred_ticket(ProcessPtr self, ConstRequestTicke
     {
         return;
     }
-    self->preferred_ticket = Some(RequestTicket, *ticket);
-    self->preferred_eligible_at_usec = CPU__time_usec();
-    self->preferred_selected_at_usec = 0;
-    self->preferred_dispatched_at_usec = 0;
-    self->preferred_trace_pending = true;
+    self->thread.preferred_ticket = Some(RequestTicket, *ticket);
+    self->thread.preferred_eligible_at_usec = CPU__time_usec();
+    self->thread.preferred_selected_at_usec = 0;
+    self->thread.preferred_dispatched_at_usec = 0;
+    self->thread.preferred_trace_pending = true;
 }
 
 static bool Scheduler__enqueue_preferred(SchedulerPtr self, ProcessPtr process, bool warm,
@@ -83,28 +83,29 @@ static bool Scheduler__enqueue_preferred(SchedulerPtr self, ProcessPtr process, 
         },
         none_do_nothing()
     );
-    if (process->state == PROC_STATE_RUNNING)
+    if (process->thread.state == PROC_STATE_RUNNING)
     {
-        process->preferred_active = true;
-        process->preferred_warm = warm;
+        process->thread.preferred_active = true;
+        process->thread.preferred_warm = warm;
         match_optional(
-            process->preferred_ticket,
+            process->thread.preferred_ticket,
             some(value)
             {
-                if (process->preferred_trace_pending)
+                if (process->thread.preferred_trace_pending)
                 {
                     uint64_t now = CPU__time_usec();
-                    process->preferred_selected_at_usec = now;
-                    process->preferred_dispatched_at_usec = now;
-                    Process__publish_dispatch_trace(process, &value, process->preferred_eligible_at_usec, now, now);
-                    process->preferred_trace_pending = false;
+                    process->thread.preferred_selected_at_usec = now;
+                    process->thread.preferred_dispatched_at_usec = now;
+                    Process__publish_dispatch_trace(process, &value, process->thread.preferred_eligible_at_usec, now,
+                                                    now);
+                    process->thread.preferred_trace_pending = false;
                 }
             },
             none_do_nothing()
         );
         return true;
     }
-    if (process->state == PROC_STATE_SWITCHING_CONTEXT)
+    if (process->thread.state == PROC_STATE_SWITCHING_CONTEXT)
     {
         return true;
     }
@@ -118,8 +119,8 @@ static bool Scheduler__enqueue_preferred(SchedulerPtr self, ProcessPtr process, 
         {
             if (warm)
             {
-                process->preferred_warm = true;
-                process->preferred_ticket = *ticket;
+                process->thread.preferred_warm = true;
+                process->thread.preferred_ticket = *ticket;
             }
             return true;
         },
@@ -129,8 +130,8 @@ static bool Scheduler__enqueue_preferred(SchedulerPtr self, ProcessPtr process, 
         ProcessTable__push(&self->preferred, process),
         success(code)
         {
-            process->preferred_warm = warm;
-            process->preferred_ticket = *ticket;
+            process->thread.preferred_warm = warm;
+            process->thread.preferred_ticket = *ticket;
             return true;
         },
         error(code, message)
@@ -158,14 +159,14 @@ void Scheduler__forget_preferred(SchedulerPtr self, ProcessPtr process)
         },
         none_do_nothing()
     );
-    process->preferred_active = false;
-    process->preferred_warm = false;
-    process->preferred_dependency_weight = 0;
-    process->preferred_ticket = None(RequestTicket);
-    process->preferred_eligible_at_usec = 0;
-    process->preferred_selected_at_usec = 0;
-    process->preferred_dispatched_at_usec = 0;
-    process->preferred_trace_pending = false;
+    process->thread.preferred_active = false;
+    process->thread.preferred_warm = false;
+    process->thread.preferred_dependency_weight = 0;
+    process->thread.preferred_ticket = None(RequestTicket);
+    process->thread.preferred_eligible_at_usec = 0;
+    process->thread.preferred_selected_at_usec = 0;
+    process->thread.preferred_dispatched_at_usec = 0;
+    process->thread.preferred_trace_pending = false;
 }
 
 static bool Scheduler__preferred_valid(SchedulerPtr self, ProcessPtr process)
@@ -175,12 +176,12 @@ static bool Scheduler__preferred_valid(SchedulerPtr self, ProcessPtr process)
         return false;
     }
     bool exec_ready = Process__has_ready_exec_continuation(process);
-    if (!exec_ready && !process->preferred_warm && !Process__shared_wait_ready(process))
+    if (!exec_ready && !process->thread.preferred_warm && !Process__shared_wait_ready(process))
     {
         return false;
     }
     match_optional(
-        process->preferred_ticket,
+        process->thread.preferred_ticket,
         some(ticket)
         {
             match_optional(
@@ -299,7 +300,7 @@ void Scheduler__refresh_preferred(SchedulerPtr self)
         index,
         process,
         {
-            process->preferred_dependency_weight =
+            process->thread.preferred_dependency_weight =
                 RequestGraph__dependency_weight(&self->request_graph, process);
         }
     );
@@ -347,6 +348,10 @@ Optional(ProcessPtr) Scheduler__take_preferred(SchedulerPtr self, CPUSchedulerPt
         index,
         process,
         {
+            if (process->lifecycle.terminating)
+            {
+                continue;
+            }
             if (!Scheduler__preferred_valid(self, process))
             {
                 continue;
@@ -361,7 +366,7 @@ Optional(ProcessPtr) Scheduler__take_preferred(SchedulerPtr self, CPUSchedulerPt
                     }
                     if (owner != cpu)
                     {
-                        if (!process->migration_safe)
+                        if (!process->thread.migration_safe)
                         {
                             continue;
                         }
@@ -369,19 +374,20 @@ Optional(ProcessPtr) Scheduler__take_preferred(SchedulerPtr self, CPUSchedulerPt
                             owner->switching_out,
                             some(outgoing)
                             {
-                                if (outgoing == process)
+                                if (outgoing == &process->thread)
                                 {
                                     continue;
                                 }
                             },
                             none_do_nothing()
                         );
-                        if (ProcessTable__len(&cpu->processes) >= MAX_PROCESSES)
+                        if (ProcessTable__len(&cpu->processes) >= MAX_PROCESSES ||
+                            ThreadTable__len(&cpu->threads) >= MAX_PROCESSES)
                         {
                             continue;
                         }
                         match_result(
-                            ProcessTable__push(&cpu->processes, process),
+                            ThreadTable__push(&cpu->threads, &process->thread),
                             success_do_nothing(),
                             error(code, message)
                             {
@@ -390,15 +396,28 @@ Optional(ProcessPtr) Scheduler__take_preferred(SchedulerPtr self, CPUSchedulerPt
                             }
                         );
                         match_result(
-                            ProcessTable__remove(&owner->processes, process),
+                            ProcessTable__push(&cpu->processes, process),
                             success_do_nothing(),
+                            error(code, message)
+                            {
+                                ThreadTable__remove(&cpu->threads, &process->thread);
+                                __d_printf(SCHEDULER, "Preferred migration process table full: %i\n", code);
+                                continue;
+                            }
+                        );
+                        match_result(
+                            ProcessTable__remove(&owner->processes, process),
+                            success(index)
+                            {
+                                ThreadTable__remove(&owner->threads, &process->thread);
+                            },
                             error(code, message)
                             {
                                 CPU__halt_all();
                                 return None(ProcessPtr);
                             }
                         );
-                        process->last_tick = cpu->last_tick;
+                        process->thread.last_tick = cpu->last_tick;
                     }
                     match_result(
                         ProcessTable__remove(&self->preferred, process),
@@ -409,15 +428,15 @@ Optional(ProcessPtr) Scheduler__take_preferred(SchedulerPtr self, CPUSchedulerPt
                             return None(ProcessPtr);
                         }
                     );
-                    process->preferred_active = true;
-                    process->migration_safe = false;
+                    process->thread.preferred_active = true;
+                    process->thread.migration_safe = false;
                     match_optional(
-                        process->preferred_ticket,
+                        process->thread.preferred_ticket,
                         some(ticket)
                         {
-                            if (process->preferred_trace_pending)
+                            if (process->thread.preferred_trace_pending)
                             {
-                                process->preferred_selected_at_usec = CPU__time_usec();
+                                process->thread.preferred_selected_at_usec = CPU__time_usec();
                             }
                         },
                         none_do_nothing()
@@ -451,17 +470,17 @@ bool Scheduler__ready_exec_continuation_waiting(SchedulerPtr self, ProcessPtr cu
 
 bool Process__retain_preferred(ProcessPtr self)
 {
-    if (!self->preferred_active || Process__has_pending_signal(self))
+    if (!self->thread.preferred_active || Process__has_pending_signal(self))
     {
         return false;
     }
-    uint64_t elapsed = CPU__time_usec() - self->dispatched_at;
+    uint64_t elapsed = CPU__time_usec() - self->thread.dispatched_at;
     if (elapsed < SCHEDULER_PREFERRED_BUDGET_USEC &&
-        (Process__shared_wait_ready(self) || (self->preferred_warm && elapsed < SCHEDULER_WARM_RESIDENCY_USEC)))
+        (Process__shared_wait_ready(self) || (self->thread.preferred_warm && elapsed < SCHEDULER_WARM_RESIDENCY_USEC)))
     {
         return true;
     }
-    self->preferred_active = false;
-    self->preferred_warm = false;
+    self->thread.preferred_active = false;
+    self->thread.preferred_warm = false;
     return false;
 }

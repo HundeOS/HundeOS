@@ -11,6 +11,7 @@
 #include "../boot_info.h"
 #include "../arch/cpu.h"
 #include "../arch/process.h"
+#include "../arch/thread_context.h"
 
 static BString no_process = bstr("No process for service syscall");
 static BString unsupported_operation = bstr("Unsupported service operation");
@@ -95,7 +96,7 @@ static Result(Anything) Service__complete_wait_syscall(ParkedOperationPtr parked
 
 Result(SystemCallResult)
     Service__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) process_opt, Anything service_operation, Anything arg2,
-                     Anything arg3, Anything arg4, Anything arg5)
+                     Anything arg3, Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
 
     match_optional(
@@ -123,21 +124,33 @@ Result(SystemCallResult)
             }
             if (service_operation == SERVICE_QUEUE_WAIT)
             {
-                match_result(
-                    Scheduler__queue_wait(kernel->scheduler, process, arg2, arg3),
-                    success(value)
+                match_optional(
+                    *caller_thread,
+                    some(thread)
                     {
-                        if (value == QUEUE_WAIT_PARKED)
+                        if (thread->owner != process)
                         {
-                            return Error(SystemCallResult, bstr("Queue wait pending"), SYSCALL_IO_BLOCK);
+                            return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS);
                         }
-                        return Success(SystemCallResult, value);
+                        match_result(
+                            Scheduler__queue_wait(kernel->scheduler, thread, arg2, arg3),
+                            success(value)
+                            {
+                                if (value == QUEUE_WAIT_PARKED)
+                                {
+                                    return Error(SystemCallResult, bstr("Queue wait pending"), SYSCALL_IO_BLOCK);
+                                }
+                                return Success(SystemCallResult, value);
+                            },
+                            error(code, message)
+                            {
+                                return Error(SystemCallResult, message, code);
+                            }
+                        );
                     },
-                    error(code, message)
-                    {
-                        return Error(SystemCallResult, message, code);
-                    }
+                    none_do_nothing()
                 );
+                return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS);
             }
             if (service_operation == SERVICE_QUEUE_DATA_AVAILABLE)
             {
@@ -151,8 +164,18 @@ Result(SystemCallResult)
                         }
                         else if (notification.reschedule && CPU__count() == 1)
                         {
-                            Process__set_syscall_result(process, SERVICE_OK);
-                            Scheduler__yield_runnable(kernel->scheduler, process, notification.cpu);
+                            match_optional(
+                                Scheduler__current_thread(kernel->scheduler, notification.cpu),
+                                some(thread)
+                                {
+                                    if (thread->owner == process)
+                                    {
+                                        ThreadContext__set_syscall_result(Thread__required_context(thread), SERVICE_OK);
+                                        Scheduler__yield_runnable(kernel->scheduler, thread, notification.cpu);
+                                    }
+                                },
+                                none_do_nothing()
+                            );
                         }
                         return Success(SystemCallResult, SERVICE_OK);
                     },
@@ -229,7 +252,7 @@ Result(SystemCallResult)
                         return Error(SystemCallResult, message, code);
                     }
                 );
-                process->process_class = PROCESS_CLASS_SERVICE;
+                process->scheduling.process_class = PROCESS_CLASS_SERVICE;
                 return Success(SystemCallResult, SERVICE_OK);
             }
 
@@ -242,11 +265,11 @@ Result(SystemCallResult)
                 }
 
                 __d_printf(SYSCALL, "service wait pid=%i name=%s queued=%i target=%p\n", process->pid,
-                           cstr(process->name), (int)ServiceEvents__len(&process->service.events), arg2);
+                           cstr(process->name), (int)ServiceEvents__len(&process->service_state.service.events), arg2);
 
-                KernelContextPtr kernel_context = KernelContext__heap_new_with_mapper(
-                    &Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler),
-                    ServiceEvent__copy_to_target, (Anything)target);
+                KernelContextPtr kernel_context =
+                    KernelContext__heap_new_with_mapper(caller_thread, &Some(SchedulerPtr, kernel->scheduler),
+                                                        ServiceEvent__copy_to_target, (Anything)target);
 
                 match_result(
                     Scheduler__service_wait_with_context_ownership(kernel->scheduler, process, kernel_context,
@@ -602,7 +625,7 @@ Result(SystemCallResult)
 
             if (service_operation == SERVICE_AUTHORIZE_MOUNT_CLIENT)
             {
-                if (!ProcessClass__is_service(process->process_class))
+                if (!ProcessClass__is_service(process->scheduling.process_class))
                 {
                     return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS);
                 }
@@ -621,7 +644,7 @@ Result(SystemCallResult)
 
             if (service_operation == SERVICE_PUBLISH_READY)
             {
-                if (!ProcessClass__is_service(process->process_class))
+                if (!ProcessClass__is_service(process->scheduling.process_class))
                 {
                     return Error(SystemCallResult, no_process, SERVICE_NOT_SERVICE_PROCESS);
                 }
@@ -654,7 +677,7 @@ Result(SystemCallResult)
                 }
 
                 KernelContextPtr kernel_context =
-                    KernelContext__heap_new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
+                    KernelContext__heap_new(caller_thread, &Some(SchedulerPtr, kernel->scheduler));
 
                 match_result(
                     Scheduler__service_wait_ready_with_context_ownership(

@@ -48,7 +48,8 @@ Result(ServiceCode) KernelServiceDirectory__map_process(KernelServiceDirectoryPt
         return Error(ServiceCode, service_directory_not_initialized, SERVICE_MAP_FAILED);
     }
 
-    PageTable__map_shared(&process->page_table, process->kernel, self->directory, HUND_SERVICE_DIRECTORY_SIZE);
+    PageTable__map_shared(&process->address_space.page_table, process->kernel, self->directory,
+                          HUND_SERVICE_DIRECTORY_SIZE);
     return Success(ServiceCode, SERVICE_OK);
 }
 

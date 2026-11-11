@@ -35,7 +35,7 @@ static void install_default_stdio(KernelPtr kernel, ProcessPtr process)
         },
         none_do_nothing()
     );
-    process->startup_stdio = SpawnStdio__new(input, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+    process->image.startup_stdio = SpawnStdio__new(input, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
     Process__prepare_startup_stdio(process);
 }
 
@@ -53,7 +53,7 @@ void schedule_as(KernelPtr kernel, ConstBStringPtr name, ProcessClass process_cl
                 {
                     __d_printf(PROCESS, "schedule_as setup success pid=%i name=%s process=%p\n", process->pid,
                                cstr(process->name), process);
-                    process->process_class = process_class;
+                    process->scheduling.process_class = process_class;
                     if (BString__equals(name, &bstr("services/hunde-mama")))
                     {
                         kernel->boot_authority = process->pid;

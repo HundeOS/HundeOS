@@ -3,6 +3,6 @@
 
 #include "arch/panic.h"
 
-void Kernel__panic(const char * error, ProcessContextPtr ctx);
+void Kernel__panic(const char * error, ThreadContextPtr ctx);
 
 #endif

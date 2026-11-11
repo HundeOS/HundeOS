@@ -23,9 +23,83 @@ static uint64_t fork_child_pid;
 static ProcessGroupResult process_group_status;
 static ProcessGroupRequest process_group_reply;
 static ProcessRegistryMapResult process_registry_map_result;
+static int64_t signal_target;
+static ProcessSignal signal_number;
+static ProcessSignalOrigin signal_origin;
+static ThreadCreateResult thread_create_result;
+static uintptr_t thread_trampoline;
+static uintptr_t thread_start;
+static Anything thread_argument;
+static ThreadJoinStatus thread_join_status;
+static ThreadID thread_join_id;
+static uint64_t thread_join_value;
+static Anything thread_pointer;
+static unsigned thread_local_releases;
+static bool allocator_locked;
+static unsigned allocator_unlocks;
+
+void Allocator__lock(void)
+{
+    TEST_ASSERT_FALSE(allocator_locked);
+    allocator_locked = true;
+}
+
+void Allocator__unlock(void)
+{
+    TEST_ASSERT_TRUE(allocator_locked);
+    allocator_locked = false;
+    allocator_unlocks++;
+}
+
+Result(ThreadLocalBlock) ThreadLocal__new_thread(void)
+{
+    ThreadLocalBlock block = {.allocation = 0x4000, .thread_pointer = 0x4080};
+    return Success(ThreadLocalBlock, block);
+}
+
+ThreadLocalStatus ThreadLocal__release(ConstThreadLocalBlockPtr block)
+{
+    TEST_ASSERT_EQUAL_HEX64(0x4000, block->allocation);
+    thread_local_releases++;
+    return THREAD_OPERATION_OK;
+}
+
+ThreadLocalStatus ThreadLocal__destroy_current(void)
+{
+    return THREAD_OPERATION_OK;
+}
+
+static void * test_thread_start(void * argument)
+{
+    return argument;
+}
 
 SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything arg3, Anything arg4, Anything arg5)
 {
+    if (num == SYSCALL_THREAD_CREATE)
+    {
+        thread_trampoline = arg1;
+        thread_start = arg2;
+        thread_argument = arg3;
+        thread_pointer = arg4;
+        return thread_create_result;
+    }
+    if (num == SYSCALL_THREAD_JOIN)
+    {
+        thread_join_id = arg1;
+        if (thread_join_status == THREAD_OPERATION_OK)
+        {
+            ((ThreadJoinResultPtr)arg2)->value = thread_join_value;
+        }
+        return thread_join_status;
+    }
+    if (num == SYSCALL_PROCESS_SIGNAL)
+    {
+        signal_target = (int64_t)arg1;
+        signal_number = (ProcessSignal)arg2;
+        signal_origin = (ProcessSignalOrigin)arg3;
+        return PROCESS_SIGNAL_OK;
+    }
     if (num == SYSCALL_PROCESS_LIST)
     {
         ProcessListRequestPtr request = (ProcessListRequestPtr)arg1;
@@ -69,6 +143,7 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
     }
     if (num == SYSCALL_PROCESS_FORK)
     {
+        TEST_ASSERT_EQUAL(arg1 == PROCESS_FORK_PREPARE, allocator_locked);
         fork_operation = (ProcessForkOperation)arg1;
         fork_child_pid = arg2;
         return fork_status;
@@ -96,6 +171,8 @@ SystemCallResult syscall(SystemCall num, Anything arg1, Anything arg2, Anything 
 
 void setUp(void)
 {
+    allocator_locked = false;
+    allocator_unlocks = 0;
     credential_status = PROCESS_CREDENTIALS_OK;
     requested_pid = 0;
     listed_process = ProcessInfo__new(0);
@@ -128,6 +205,69 @@ void setUp(void)
     process_group_status = PROCESS_GROUP_OK;
     process_group_reply = (ProcessGroupRequest){0};
     process_registry_map_result = PROCESS_REGISTRY_VADDR;
+    signal_target = 0;
+    signal_number = 0;
+    signal_origin = PROCESS_SIGNAL_ORIGIN_PROCESS;
+    thread_create_result = 2;
+    thread_trampoline = 0;
+    thread_start = 0;
+    thread_argument = 0;
+    thread_join_status = THREAD_OPERATION_OK;
+    thread_join_id = 0;
+    thread_join_value = 42;
+    thread_pointer = 0;
+    thread_local_releases = 0;
+}
+
+void test_thread_create_passes_runtime_trampoline_and_start(void)
+{
+    TEST_ASSERT_EQUAL_INT64(2, thread_create(test_thread_start, (void *)(uintptr_t)41));
+    TEST_ASSERT_NOT_EQUAL(0, thread_trampoline);
+    TEST_ASSERT_EQUAL_HEX64((uintptr_t)test_thread_start, thread_start);
+    TEST_ASSERT_EQUAL_HEX64(41, thread_argument);
+    TEST_ASSERT_EQUAL_HEX64(0x4080, thread_pointer);
+}
+
+void test_thread_create_failure_releases_unpublished_thread_local_state(void)
+{
+    thread_create_result = THREAD_OPERATION_BUSY;
+    TEST_ASSERT_EQUAL(THREAD_OPERATION_BUSY, thread_create(test_thread_start, (void *)(uintptr_t)41));
+    TEST_ASSERT_EQUAL_UINT(1, thread_local_releases);
+}
+
+void test_thread_join_returns_result_from_kernel(void)
+{
+    match_result(thread_join(2),
+        success(joined)
+        {
+            TEST_ASSERT_EQUAL_HEX64(42, joined.value);
+        },
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL_UINT64(2, thread_join_id);
+}
+
+void test_thread_join_reports_kernel_error(void)
+{
+    thread_join_status = THREAD_OPERATION_NOT_FOUND;
+    match_result(
+        thread_join(4),
+        success_test_fail(),
+        error(code, message)
+        {
+            TEST_ASSERT_EQUAL(THREAD_OPERATION_NOT_FOUND, code);
+        }
+    );
+}
+
+void test_terminal_interrupt_group_uses_restricted_signal_origin(void)
+{
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INVALID_ARGUMENT, terminal_interrupt_group(0));
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INVALID_ARGUMENT, terminal_interrupt_group(INT64_MAX + 1ULL));
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_OK, terminal_interrupt_group(42));
+    TEST_ASSERT_EQUAL_INT64(-42, signal_target);
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_INTERRUPT, signal_number);
+    TEST_ASSERT_EQUAL(PROCESS_SIGNAL_ORIGIN_TERMINAL, signal_origin);
 }
 
 void test_process_registry_map_returns_kernel_selected_address(void)
@@ -168,6 +308,19 @@ void test_process_fork_returns_typed_syscall_result(void)
     TEST_ASSERT_EQUAL_INT64(73, process_fork_abort(92));
     TEST_ASSERT_EQUAL(PROCESS_FORK_ABORT, fork_operation);
     TEST_ASSERT_EQUAL_UINT64(92, fork_child_pid);
+    TEST_ASSERT_EQUAL_UINT(1, allocator_unlocks);
+    TEST_ASSERT_FALSE(allocator_locked);
+}
+
+void test_process_fork_unlocks_allocator_in_child_and_on_failure(void)
+{
+    fork_status = 0;
+    TEST_ASSERT_EQUAL_INT64(0, process_fork());
+    TEST_ASSERT_FALSE(allocator_locked);
+    fork_status = PROCESS_FORK_NO_MEMORY;
+    TEST_ASSERT_EQUAL_INT64(PROCESS_FORK_NO_MEMORY, process_fork());
+    TEST_ASSERT_FALSE(allocator_locked);
+    TEST_ASSERT_EQUAL_UINT(2, allocator_unlocks);
 }
 
 void tearDown(void)

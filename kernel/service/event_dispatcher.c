@@ -77,7 +77,7 @@ Result(ServiceCode)
 {
     __d_printf(SCHEDULER, "service event dispatcher enqueue pid=%i name=%s type=%i source=%i data=%i queued=%i\n",
                process->pid, cstr(process->name), event.type, event.source, event.data,
-               (int)ServiceEvents__len(&process->service.events));
+               (int)ServiceEvents__len(&process->service_state.service.events));
 
     critical_section(
         self->lock,
@@ -169,7 +169,7 @@ static void ServiceEventDispatcher__mark_active_irq_event_locked(ServiceEventDis
             if (service->process == process && service->pending)
             {
                 __d_printf(IRQ, "service event dispatcher active irq=%i pid=%i\n", event.source, process->pid);
-                process->service.active_irq_event = Some(ServiceEvent, event);
+                process->service_state.service.active_irq_event = Some(ServiceEvent, event);
             }
         },
         none_do_nothing()
@@ -207,7 +207,7 @@ Result(ServiceCode)
         self->lock,
         {
             match_optional(
-                process->service.active_irq_event,
+                process->service_state.service.active_irq_event,
                 some(event)
                 {
                     match_optional(
@@ -220,14 +220,14 @@ Result(ServiceCode)
                                            event.source, process->pid);
                                 service->pending = false;
                                 service->coalesced_count = 0;
-                                process->service.active_irq_event = None(ServiceEvent);
+                                process->service_state.service.active_irq_event = None(ServiceEvent);
                                 Arch__unmask_irq(interrupt_controller, event.source);
                                 cs_return(Success(ServiceCode, SERVICE_OK));
                             }
                         },
                         none_do_nothing()
                     );
-                    process->service.active_irq_event = None(ServiceEvent);
+                    process->service_state.service.active_irq_event = None(ServiceEvent);
                 },
                 none_do_nothing()
             );
@@ -273,7 +273,7 @@ Result(ServiceCode) ServiceEventDispatcher__unsubscribe_process(ServiceEventDisp
                     IRQServiceMap__delete(&self->irq_services, irq);
                 }
             );
-            process->service.active_irq_event = None(ServiceEvent);
+            process->service_state.service.active_irq_event = None(ServiceEvent);
         }
     );
 

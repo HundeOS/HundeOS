@@ -7,7 +7,7 @@
 #include "arch/device.h"
 #include "arch/cpu.h"
 #include "arch/process.h"
-#include "arch/process_context.h"
+#include "arch/thread_context.h"
 #include "arch/cache.h"
 #include "types/bstring.h"
 #include "types/result.h"
@@ -25,12 +25,16 @@
 #include "idle_debug.h"
 
 FixedArrayBodyDefine(ProcessTable);
+FixedArrayBodyDefine(ThreadTable);
+LinkedListBodyDefine(ProcessThreads);
 FixedArrayBodyDefine(ProcessArguments);
 FixedArrayBodyDefine(SpawnArguments);
 FixedArrayBodyDefine(ProcessChildEvents);
 LinkedListBodyDefine(UserAllocations);
 LinkedListBodyDefine(UserMappings);
 LinkedListBodyDefine(ParkedOperations);
+LinkedListBodyDefine(PendingForkChildren);
+LinkedListBodyDefine(LiveChildren);
 MapBodyDefine(ProcessSignalActions);
 LinkedListBodyDefine(ProcessSignalFrames);
 
@@ -56,14 +60,14 @@ static const ProcessCapabilities PROCESS__HUND_CAPABILITIES =
     PROCESS_CAP_HANDLE_BLOCK_REQUESTS | PROCESS_CAP_MOUNT_FILESYSTEM | PROCESS_CAP_USE_BLOCK_DEVICES |
     PROCESS_CAP_MANAGE_SHARED_PAGES;
 
-FixedArrayBodyDefine(ProcessVirtioDevices);
+FixedArrayBodyDefine(ClaimedMmioBases);
 
-void ProcessContext__dispose(ProcessContextPtr self)
+void ThreadContext__dispose(ThreadContextPtr self)
 {
     Kernel__free(addr(self));
 }
 
-Result(ProcessContextSaveCode) Process__store_context(ProcessPtr self, ProcessContextPtr context)
+Result(ThreadContextSaveCode) Thread__store_context(ThreadPtr self, ThreadContextPtr context)
 {
     match_optional(
         self->context,
@@ -72,39 +76,49 @@ Result(ProcessContextSaveCode) Process__store_context(ProcessPtr self, ProcessCo
             if (self->state != PROC_STATE_RUNNING)
             {
                 BString format = bstr("Process not running state=%s pid=%i name=%s\n");
-                BString message =
-                    BString__sprintf(&format, ProcessState__to_string(self->state), self->pid, cstr(self->name));
-                return Error(ProcessContextSaveCode, message, PROCESS_CONTEXT_SAVE_INVALID_STATE);
+                BString message = BString__sprintf(&format, ProcessState__to_string(self->state), self->owner->pid,
+                                                   cstr(self->owner->name));
+                return Error(ThreadContextSaveCode, message, THREAD_CONTEXT_SAVE_INVALID_STATE);
             }
 
-            __d_printf(PROCESS, "Process context save self=%p context=%p %i\n", destination, context, self->pid);
-            ProcessContext__copy(destination, context);
-            return Success(ProcessContextSaveCode, PROCESS_CONTEXT_SAVE_OK);
+            __d_printf(PROCESS, "Thread context save self=%p context=%p %i\n", destination, context, self->owner->pid);
+            ThreadContext__copy(destination, context);
+            return Success(ThreadContextSaveCode, THREAD_CONTEXT_SAVE_OK);
         },
         none()
         {
-            return Error(ProcessContextSaveCode, bstr("Process context is missing"),
-                         PROCESS_CONTEXT_SAVE_DESTINATION_MISSING);
+            return Error(ThreadContextSaveCode, bstr("Thread context is missing"),
+                         THREAD_CONTEXT_SAVE_DESTINATION_MISSING);
         }
     );
 }
 
-Result(ProcessContextSaveCode) Process__save_context(ProcessPtr self, const OptionalPtr(ProcessContextPtr) context)
+Result(ThreadContextSaveCode) Thread__save_context(ThreadPtr self, const OptionalPtr(ThreadContextPtr) context)
 {
     match_optional(
         *context,
         some(source)
         {
-            return Process__store_context(self, source);
+            return Thread__store_context(self, source);
         },
         none()
         {
-            return Success(ProcessContextSaveCode, PROCESS_CONTEXT_SAVE_OK);
+            return Success(ThreadContextSaveCode, THREAD_CONTEXT_SAVE_OK);
         }
     );
 }
 
-ProcessContextPtr Process__required_context(ProcessPtr self)
+Result(ThreadContextSaveCode) Process__store_context(ProcessPtr self, ThreadContextPtr context)
+{
+    return Thread__store_context(&self->thread, context);
+}
+
+Result(ThreadContextSaveCode) Process__save_context(ProcessPtr self, const OptionalPtr(ThreadContextPtr) context)
+{
+    return Thread__save_context(&self->thread, context);
+}
+
+ThreadContextPtr Thread__required_context(ThreadPtr self)
 {
     match_optional(
         self->context,
@@ -114,24 +128,34 @@ ProcessContextPtr Process__required_context(ProcessPtr self)
         },
         none()
         {
-            __d_printf(PANIC, "Process context is missing pid=%i name=%s\n", self->pid, cstr(self->name));
+            __d_printf(PANIC, "Thread context is missing pid=%i name=%s\n", self->owner->pid, cstr(self->owner->name));
             CPU__halt_all();
             __builtin_unreachable();
         }
     );
 }
 
+ThreadContextPtr Process__required_context(ProcessPtr self)
+{
+    return Thread__required_context(&self->thread);
+}
+
 void Process__activate_address_space(ProcessPtr self)
 {
-    ProcessContextPtr context = Process__required_context(self);
-    KernelAddress page_table = ProcessPageTable__root(&self->page_table);
+    ThreadContextPtr context = Process__required_context(self);
+    KernelAddress page_table = ProcessPageTable__root(&self->address_space.page_table);
     Process__switch_address_space(self, context, page_table);
+}
+
+void Process__address_space_switched(ProcessPtr self)
+{
+    Scheduler__address_space_switched(self->kernel->scheduler, CPU__id(), self);
 }
 
 void Process__context_switch(ProcessPtr self)
 {
-    ProcessContextPtr context = Process__required_context(self);
-    KernelAddress page_table = ProcessPageTable__root(&self->page_table);
+    ThreadContextPtr context = Process__required_context(self);
+    KernelAddress page_table = ProcessPageTable__root(&self->address_space.page_table);
     Process__switch_context(self, context, page_table);
 }
 
@@ -318,7 +342,7 @@ Result(ProcessMemoryCode) Process__copy_from_user(ProcessPtr self, Address sourc
     {
         UserAllocationRangeMatch range = UserAllocationRangeMatch__new(source + copied, 1);
         match_find_result(
-            UserAllocations__find(&self->user_allocations, allocation_is_readable_range, &range),
+            UserAllocations__find(&self->address_space.user_allocations, allocation_is_readable_range, &range),
             some(allocation)
             {
                 size_t offset = range.virtual_address - allocation.address.virtual_addr;
@@ -364,7 +388,7 @@ static bool Process__user_range_is_free(ProcessPtr self, Address virtual_address
     Address range_end = virtual_address + size;
     for_each_ll(
         UserAllocations,
-        self->user_allocations,
+        self->address_space.user_allocations,
         allocation,
         {
             Address allocation_start = allocation.address.virtual_addr;
@@ -398,7 +422,7 @@ static Optional(Address) Process__find_free_user_range(ProcessPtr self, size_t s
         Address next_candidate = candidate;
         for_each_ll(
             UserAllocations,
-            self->user_allocations,
+            self->address_space.user_allocations,
             allocation,
             {
                 Address allocation_start = allocation.address.virtual_addr;
@@ -656,6 +680,65 @@ static Result(ProcessSetupStatus) Process__map_service_directory(ProcessPtr self
     return Error(ProcessSetupStatus, user_allocation_not_found, PROCESS_FAILED_TO_SETUP);
 }
 
+static ProcessAddressSpace ProcessAddressSpace__new(ConstProcessPageTablePtr page_table)
+{
+    return (ProcessAddressSpace){
+        .page_table = *page_table,
+        .heap_break = USER_HEAP_BASE,
+        .heap_mapped_end = USER_HEAP_BASE,
+        .user_allocations = UserAllocations__new(),
+        .user_mappings = UserMappings__new(),
+        .claimed_mmio_bases = ClaimedMmioBases__new(),
+        .idle_debug_address = None(UserAddress),
+    };
+}
+
+static ProcessImage ProcessImage__new(ConstUserAddressPtr entry)
+{
+    return (ProcessImage){
+        .entry_point = *entry,
+        .thread_local_image = ThreadLocalImage__new(0, 0, 0, 1),
+        .startup_stdio = SPAWN_STDIO_DEFAULT,
+        .exec_load = None(ExecLoadPtr),
+    };
+}
+
+static ProcessIpc ProcessIpc__new(void)
+{
+    return (ProcessIpc){
+        .queue_wait_control = None(UserAddress),
+        .ipc_doorbell = None(UserAddress),
+    };
+}
+
+static ProcessService ProcessService__new(void)
+{
+    return (ProcessService){.service = ServiceState__new()};
+}
+
+static ProcessSignalState ProcessSignalState__new(void)
+{
+    return (ProcessSignalState){
+        .signal_actions = ProcessSignalActions__new(),
+        .alarm_deadline_usec = None(ProcessAlarmDeadline),
+    };
+}
+
+static ProcessAccounting ProcessAccounting__new(void)
+{
+    return (ProcessAccounting){.cpu_usage = CPUUsage__new()};
+}
+
+static ProcessScheduling ProcessScheduling__new(void)
+{
+    return (ProcessScheduling){.process_class = PROCESS_CLASS_NORMAL};
+}
+
+static ProcessLifecycle ProcessLifecycle__new(void)
+{
+    return (ProcessLifecycle){.execed_since_fork = true, .abort = None(ProcessAbort)};
+}
+
 static Result(ProcessPtr)
     Process__new_base(KernelPtr kernel, ProcessID pid, ConstBStringPtr name, ConstProcessPageTablePtr page_table,
                       ConstUserAddressPtr entry, ConstStackPtr stack, OptionalPtr(ProcessPtr) parent)
@@ -664,37 +747,34 @@ static Result(ProcessPtr)
     ProcessPtr proc = ptr(Kernel__alloc_kernel(sizeof(Process)), Process);
     proc->lock = MUTEX_INIT;
     proc->kernel = kernel;
-    proc->entry_point = *entry;
-    proc->page_table = *page_table;
-    proc->context = None(ProcessContextPtr);
-    proc->state = PROC_STATE_NEW;
+    proc->address_space = ProcessAddressSpace__new(page_table);
+    proc->image = ProcessImage__new(entry);
+    proc->ipc = ProcessIpc__new();
+    proc->service_state = ProcessService__new();
+    proc->signals = ProcessSignalState__new();
+    proc->accounting = ProcessAccounting__new();
+    proc->scheduling = ProcessScheduling__new();
+    proc->lifecycle = ProcessLifecycle__new();
+    proc->thread = Thread__new(proc, stack);
+    proc->threads = ProcessThreads__new();
+    proc->next_thread_id = 2;
+    match_result(
+        ProcessThreads__push(&proc->threads, &proc->thread),
+        success_do_nothing(),
+        error(code, message)
+        {
+            ProcessThreads__dispose(&proc->threads);
+            Kernel__free(addr(proc));
+            return Error(ProcessPtr, message, code);
+        }
+    );
     proc->pid = pid;
     proc->process_group_id = pid;
     proc->session_id = pid;
-    proc->execed_since_fork = true;
-    proc->process_registry_mapped = false;
-    proc->stack = *stack;
-    proc->last_tick = 0;
-    proc->dispatched_at = 0;
-    proc->migration_safe = true;
-    proc->preferred_active = false;
-    proc->preferred_warm = false;
-    proc->preferred_dependency_weight = 0;
-    proc->preferred_ticket = None(RequestTicket);
-    proc->preferred_eligible_at_usec = 0;
-    proc->preferred_selected_at_usec = 0;
-    proc->preferred_dispatched_at_usec = 0;
-    proc->preferred_trace_pending = false;
-    proc->cpu_usage = CPUUsage__new();
-    proc->queue_wait_usage = QueueWaitUsage__new();
-    proc->queue_wait_control = None(UserAddress);
-    proc->queue_wait_doorbell = None(IpcEventGeneration);
-    proc->ipc_doorbell = None(UserAddress);
     proc->name = *name;
-    proc->startup_argument_count = 0;
-    proc->parked_operations = ParkedOperations__new();
     proc->parent = *parent;
-    proc->pending_fork_child = None(ProcessPtr);
+    proc->pending_fork_children = PendingForkChildren__new();
+    proc->live_children = LiveChildren__new();
     proc->parent_pid = None(ProcessID);
     match_optional(
         *parent,
@@ -706,38 +786,18 @@ static Result(ProcessPtr)
         },
         none_do_nothing()
     );
-    proc->heap_break = USER_HEAP_BASE;
-    proc->heap_mapped_end = USER_HEAP_BASE;
-    proc->user_allocations = UserAllocations__new();
-    proc->user_mappings = UserMappings__new();
-    proc->virtio_devices = ProcessVirtioDevices__new();
-    proc->startup_stdio = SPAWN_STDIO_DEFAULT;
     match_optional(
         *parent,
         some(parent_process)
         {
-            proc->startup_stdio = parent_process->startup_stdio;
+            proc->image.startup_stdio = parent_process->image.startup_stdio;
         },
         none_do_nothing()
     );
-    proc->abort = None(ProcessAbort);
-    proc->process_class = PROCESS_CLASS_NORMAL;
-    proc->exec_load = None(ExecLoadPtr);
-    proc->service = ServiceState__new();
-    proc->memory_reclaimer = false;
-    proc->idle_debug_address = None(UserAddress);
     proc->user_id = PROCESS_USER_ROOT;
     proc->group_id = PROCESS_GROUP_ROOT;
     proc->capabilities = PROCESS_CAP_ALL;
-    proc->signal_actions = ProcessSignalActions__new();
-    proc->signal_mask = 0;
-    proc->pending_signals = 0;
-    proc->forced_signal = None(ProcessSignal);
-    proc->signal_frames = ProcessSignalFrames__new();
-    proc->alarm_deadline_usec = None(ProcessAlarmDeadline);
     proc->child_events = ProcessChildEvents__new();
-    proc->children_user_usec = 0;
-    proc->children_system_usec = 0;
 
     match_optional(
         *parent,
@@ -782,17 +842,17 @@ static Result(ProcessPtr)
                 Process__setup_startup(proc, startup_input),
                 success(startup)
                 {
-                    proc->startup_argument_count = startup.argument_count;
+                    proc->image.startup_argument_count = startup.argument_count;
                     __d_printf(
                         PROCESS,
                         "Process__new before context init pid=%i proc=%p stack_ptr=%p stack_base=%p stack_top=%p argc=%i argv=%p entry=%p page_table=%p\n",
-                        proc->pid, proc, &proc->stack, proc->stack.base.virtual_addr, proc->stack.top.virtual_addr,
-                        startup.argument_count, startup.arguments, entry->virtual_addr,
-                        ProcessPageTable__root(&proc->page_table).phys_addr);
-                    KernelAddress root = ProcessPageTable__root(&proc->page_table);
-                    ProcessContextPtr context =
-                        ProcessContext__init(kernel, proc->pid, &proc->stack, *entry, root, &startup);
-                    proc->context = Some(ProcessContextPtr, context);
+                        proc->pid, proc, &proc->thread.stack, proc->thread.stack.base.virtual_addr,
+                        proc->thread.stack.top.virtual_addr, startup.argument_count, startup.arguments,
+                        entry->virtual_addr, ProcessPageTable__root(&proc->address_space.page_table).phys_addr);
+                    KernelAddress root = ProcessPageTable__root(&proc->address_space.page_table);
+                    ThreadContextPtr context =
+                        ThreadContext__init(kernel, proc->pid, &proc->thread.stack, *entry, root, &startup);
+                    proc->thread.context = Some(ThreadContextPtr, context);
                     __d_printf(PROCESS, "Process__new after context init pid=%i proc=%p context=%p\n", proc->pid, proc,
                                context);
                     return Success(ProcessPtr, proc);
@@ -830,7 +890,7 @@ static bool Process__has_forkable_allocations(ProcessPtr self)
 {
     for_each_ll(
         UserAllocations,
-        self->user_allocations,
+        self->address_space.user_allocations,
         allocation,
         {
             if (allocation.type == USER_ALLOCATION_MMIO)
@@ -845,11 +905,16 @@ static bool Process__has_forkable_allocations(ProcessPtr self)
 
 static bool Process__forkable(ProcessPtr self)
 {
-    return self->state == PROC_STATE_RUNNING && self->process_class == PROCESS_CLASS_NORMAL &&
-           ParkedOperations__len(&self->parked_operations) == 0 &&
-           ProcessVirtioDevices__len(&self->virtio_devices) == 0 && is_nothing(self->exec_load) &&
-           is_nothing(self->idle_debug_address) && is_nothing(self->pending_fork_child) &&
-           Process__has_forkable_allocations(self);
+    return !Process__has_multiple_threads(self) && self->thread.state == PROC_STATE_RUNNING &&
+           self->scheduling.process_class == PROCESS_CLASS_NORMAL &&
+           ParkedOperations__len(&self->thread.parked_operations) == 0 &&
+           ClaimedMmioBases__len(&self->address_space.claimed_mmio_bases) == 0 && is_nothing(self->image.exec_load) &&
+           is_nothing(self->address_space.idle_debug_address) && Process__has_forkable_allocations(self);
+}
+
+bool Process__has_multiple_threads(ProcessPtr self)
+{
+    return ProcessThreads__len(&self->threads) > 1;
 }
 
 static void Process__dispose_unpublished_fork_child(ProcessPtr self)
@@ -866,7 +931,7 @@ static Result(ProcessMemoryCode)
     Address allocation_end = allocation_start + source->size;
     for_each_ll(
         UserMappings,
-        source_process->user_mappings,
+        source_process->address_space.user_mappings,
         mapping,
         {
             Address mapping_start = mapping.address.virtual_addr;
@@ -913,7 +978,7 @@ static Result(ProcessMemoryCode)
             Kernel__memcopy(source->address.kernel_addr.virtual_addr, copy.kernel_addr.virtual_addr, source->size);
             if (copy.read || copy.write || copy.execute)
             {
-                PageTable__map_unpublished(&self->page_table, self->kernel, copy, source->size);
+                PageTable__map_unpublished(&self->address_space.page_table, self->kernel, copy, source->size);
             }
             match_result(
                 Process__record_user_allocation(self, copy, source->size, source->type),
@@ -932,19 +997,19 @@ static Result(ProcessMemoryCode)
                     }
                     if (source->type == USER_ALLOCATION_STACK)
                     {
-                        self->stack.base = copy;
-                        self->stack.top = UserAddress__relative(&copy, source->size);
+                        self->thread.stack.base = copy;
+                        self->thread.stack.top = UserAddress__relative(&copy, source->size);
                     }
-                    Address entry = self->entry_point.virtual_addr;
+                    Address entry = self->image.entry_point.virtual_addr;
                     if (entry >= source->address.virtual_addr && entry - source->address.virtual_addr < source->size)
                     {
-                        self->entry_point = UserAddress__relative(&copy, entry - source->address.virtual_addr);
+                        self->image.entry_point = UserAddress__relative(&copy, entry - source->address.virtual_addr);
                     }
                     return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
                 },
                 error(code, message)
                 {
-                    PageTable__unmap(&self->page_table, self->kernel, copy.virtual_addr, source->size);
+                    PageTable__unmap(&self->address_space.page_table, self->kernel, copy.virtual_addr, source->size);
                     Kernel__free(copy.kernel_addr.virtual_addr);
                     return Error(ProcessMemoryCode, message, code);
                 }
@@ -966,7 +1031,7 @@ static bool Process__inherits_fork_allocation(ProcessPtr self, ConstUserAllocati
         return false;
     }
     match_optional(
-        self->queue_wait_control,
+        self->ipc.queue_wait_control,
         some(mapping)
         {
             if (allocation->address.virtual_addr == mapping.virtual_addr)
@@ -998,19 +1063,21 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
             Stack stack = NULL_STACK;
             Optional(ProcessPtr) parent = Some(ProcessPtr, self);
             match_result(
-                Process__new_base(self->kernel, pid, &self->name, &page_table, &self->entry_point, &stack, &parent),
+                Process__new_base(self->kernel, pid, &self->name, &page_table, &self->image.entry_point, &stack,
+                                  &parent),
                 success(child)
                 {
-                    child->startup_argument_count = self->startup_argument_count;
-                    child->execed_since_fork = false;
-                    child->heap_break = self->heap_break;
-                    child->heap_mapped_end = self->heap_mapped_end;
-                    child->signal_actions = self->signal_actions;
-                    child->signal_mask = self->signal_mask;
+                    child->image.startup_argument_count = self->image.startup_argument_count;
+                    child->image.thread_local_image = self->image.thread_local_image;
+                    child->lifecycle.execed_since_fork = false;
+                    child->address_space.heap_break = self->address_space.heap_break;
+                    child->address_space.heap_mapped_end = self->address_space.heap_mapped_end;
+                    child->signals.signal_actions = self->signals.signal_actions;
+                    child->thread.signal_mask = self->thread.signal_mask;
 
                     for_each_ll(
                         UserAllocations,
-                        self->user_allocations,
+                        self->address_space.user_allocations,
                         allocation,
                         {
                             if (!Process__inherits_fork_allocation(self, &allocation))
@@ -1029,10 +1096,10 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
                         }
                     );
 
-                    ProcessContextPtr context = ProcessContext__clone(self->kernel, Process__required_context(self));
-                    child->context = Some(ProcessContextPtr, context);
+                    ThreadContextPtr context = ThreadContext__clone(self->kernel, Process__required_context(self));
+                    child->thread.context = Some(ThreadContextPtr, context);
                     Process__set_syscall_result(child, 0);
-                    ArchPageTable__publish(&child->page_table);
+                    ArchPageTable__publish(&child->address_space.page_table);
                     return Success(ProcessPtr, child);
                 },
                 error(code, message)
@@ -1050,23 +1117,106 @@ Result(ProcessPtr) Process__fork(ProcessPtr self)
     return Error(ProcessPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
-void Process__abort_pending_fork(ProcessPtr self)
+static bool PendingForkChild__matches_pid(ProcessPtr * candidate, void * context)
 {
-    match_optional(
-        self->pending_fork_child,
-        some(child)
-        {
-            self->pending_fork_child = None(ProcessPtr);
-            Process__dispose_unpublished_fork_child(child);
-        },
-        none_do_nothing()
-    );
+    return (*candidate)->pid == *(ProcessIDPtr)context;
 }
 
-Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation)
+Result(CollectionCode) Process__add_pending_fork_child(ProcessPtr self, ProcessPtr child)
 {
     critical_section(
         self->lock,
+        {
+            cs_return(PendingForkChildren__push(&self->pending_fork_children, child));
+        }
+    );
+    return Error(CollectionCode, bstr("Pending fork child allocation failed"), LINKED_LIST_ALLOCATION_FAILED);
+}
+
+Result(ProcessPtr) Process__take_pending_fork_child(ProcessPtr self, ProcessID child_pid)
+{
+    critical_section(
+        self->lock,
+        {
+            match_find_result(
+                PendingForkChildren__find(&self->pending_fork_children, PendingForkChild__matches_pid, &child_pid),
+                some(child)
+                {
+                    match_result(
+                        PendingForkChildren__remove(&self->pending_fork_children, child),
+                        success(_)
+                        {
+                            cs_return(Success(ProcessPtr, child));
+                        },
+                        error(code, message)
+                        {
+                            cs_return(Error(ProcessPtr, message, code));
+                        }
+                    );
+                },
+                none()
+                {
+                    cs_return(Error(ProcessPtr, bstr("Pending fork child not found"), PROCESS_FORK_CHILD_NOT_FOUND));
+                }
+            );
+        }
+    );
+    return Error(ProcessPtr, bstr("Pending fork child not found"), PROCESS_FORK_CHILD_NOT_FOUND);
+}
+
+Result(ProcessID) Process__abort_pending_fork(ProcessPtr self, ProcessID child_pid)
+{
+    match_result(
+        Process__take_pending_fork_child(self, child_pid),
+        success(child)
+        {
+            Process__dispose_unpublished_fork_child(child);
+            return Success(ProcessID, child_pid);
+        },
+        error(code, message)
+        {
+            return Error(ProcessID, message, code);
+        }
+    );
+    return Error(ProcessID, bstr("Pending fork child not found"), PROCESS_FORK_CHILD_NOT_FOUND);
+}
+
+static void Process__abort_all_pending_forks(ProcessPtr self)
+{
+    while (true)
+    {
+        Optional(ProcessPtr) child = None(ProcessPtr);
+        critical_section(
+            self->lock,
+            {
+                match_optional(
+                    PendingForkChildren__remove_at(&self->pending_fork_children, 0),
+                    some(pending)
+                    {
+                        child = Some(ProcessPtr, pending);
+                    },
+                    none_do_nothing()
+                );
+            }
+        );
+
+        match_optional(child,
+            some(pending)
+            {
+                Process__dispose_unpublished_fork_child(pending);
+            },
+            none()
+            {
+                return;
+            }
+        );
+    }
+}
+
+Result(CollectionCode) Thread__push_parked_operation(ThreadPtr self, ParkedOperationPtr operation)
+{
+    critical_section(
+        self->owner->lock,
         {
             match_result(
                 ParkedOperations__push(&self->parked_operations, operation),
@@ -1085,13 +1235,18 @@ Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOpe
     return Error(CollectionCode, bstr("Unable to push parked operation"), LINKED_LIST_ALLOCATION_FAILED);
 }
 
+Result(CollectionCode) Process__push_parked_operation(ProcessPtr self, ParkedOperationPtr operation)
+{
+    return Thread__push_parked_operation(&self->thread, operation);
+}
+
 Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
 {
     critical_section(
         self->lock,
         {
             match_optional(
-                ParkedOperations__remove_at(&self->parked_operations, -1),
+                ParkedOperations__remove_at(&self->thread.parked_operations, -1),
                 some(parked_operation)
                 {
                     cs_return(Some(ParkedOperationPtr, parked_operation));
@@ -1104,10 +1259,10 @@ Optional(ParkedOperationPtr) Process__pop_parked_operation(ProcessPtr self)
     return None(ParkedOperationPtr);
 }
 
-Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self)
+Optional(ParkedOperationPtr) Thread__pop_ready_parked_operation(ThreadPtr self)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
             {
@@ -1136,10 +1291,15 @@ Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self
     return None(ParkedOperationPtr);
 }
 
-Optional(ParkReason) Process__top_park_reason(ProcessPtr self)
+Optional(ParkedOperationPtr) Process__pop_ready_parked_operation(ProcessPtr self)
+{
+    return Thread__pop_ready_parked_operation(&self->thread);
+}
+
+Optional(ParkReason) Thread__top_park_reason(ThreadPtr self)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             match_optional(
                 ParkedOperations__at(&self->parked_operations, -1),
@@ -1155,10 +1315,15 @@ Optional(ParkReason) Process__top_park_reason(ProcessPtr self)
     return None(ParkReason);
 }
 
-Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
+Optional(ParkReason) Process__top_park_reason(ProcessPtr self)
+{
+    return Thread__top_park_reason(&self->thread);
+}
+
+Optional(SchedulerPtr) Thread__top_parked_operation_scheduler(ThreadPtr self)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             match_optional(
                 ParkedOperations__at(&self->parked_operations, -1),
@@ -1181,10 +1346,15 @@ Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
     return None(SchedulerPtr);
 }
 
-bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
+Optional(SchedulerPtr) Process__top_parked_operation_scheduler(ProcessPtr self)
+{
+    return Thread__top_parked_operation_scheduler(&self->thread);
+}
+
+bool Thread__has_parked_operation(ThreadPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0;
                  index--)
@@ -1229,10 +1399,15 @@ bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalP
     return false;
 }
 
-bool Process__write_child_abort_report(ProcessPtr self, SpawnAbortReport report)
+bool Process__has_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
+{
+    return Thread__has_parked_operation(&self->thread, reason, operation_key);
+}
+
+bool Thread__write_child_abort_report(ThreadPtr self, SpawnAbortReport report)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0;
                  index--)
@@ -1257,10 +1432,15 @@ bool Process__write_child_abort_report(ProcessPtr self, SpawnAbortReport report)
     return false;
 }
 
-bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
+bool Process__write_child_abort_report(ProcessPtr self, SpawnAbortReport report)
+{
+    return Thread__write_child_abort_report(&self->thread, report);
+}
+
+bool Thread__has_ready_parked_operation(ThreadPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
             {
@@ -1304,11 +1484,16 @@ bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, Opt
     return false;
 }
 
-bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
-                                          OptionalPtr(ReturnCode) return_code)
+bool Process__has_ready_parked_operation(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key)
+{
+    return Thread__has_ready_parked_operation(&self->thread, reason, operation_key);
+}
+
+bool Thread__mark_parked_operation_ready(ThreadPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
+                                         OptionalPtr(ReturnCode) return_code)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0;
                  index--)
@@ -1357,13 +1542,20 @@ bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, Op
     return false;
 }
 
-bool Process__mark_child_wait_ready(ProcessPtr self, ProcessID child_pid, ProcessGroupID child_process_group_id,
-                                    uint64_t event_type)
+bool Process__mark_parked_operation_ready(ProcessPtr self, ParkReason reason, OptionalPtr(OperationKey) operation_key,
+                                          OptionalPtr(ReturnCode) return_code)
+{
+    return Thread__mark_parked_operation_ready(&self->thread, reason, operation_key, return_code);
+}
+
+bool Thread__mark_child_wait_ready(ThreadPtr self, ProcessID child_pid, ProcessGroupID child_process_group_id,
+                                   uint64_t event_type)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
-            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0;
+                 index--)
             {
                 match_optional(
                     ParkedOperations__at(&self->parked_operations, index),
@@ -1380,9 +1572,10 @@ bool Process__mark_child_wait_ready(ProcessPtr self, ProcessID child_pid, Proces
                                          (options & PROCESS_CHILD_WAIT_UNTRACED) != 0) ||
                                         (event_type == PROCESS_CHILD_EVENT_CONTINUED &&
                                          (options & PROCESS_CHILD_WAIT_CONTINUED) != 0);
-                        bool child_selected = (selection > 0 && (ProcessID)selection == child_pid) || selection == -1 ||
-                                              (selection == 0 && self->process_group_id == child_process_group_id) ||
-                                              (selection < -1 && (ProcessGroupID)-selection == child_process_group_id);
+                        bool child_selected =
+                            (selection > 0 && (ProcessID)selection == child_pid) || selection == -1 ||
+                            (selection == 0 && self->owner->process_group_id == child_process_group_id) ||
+                            (selection < -1 && (ProcessGroupID)-selection == child_process_group_id);
                         if (selected && child_selected)
                         {
                             ParkedOperation__mark_ready(parked_operation);
@@ -1398,13 +1591,19 @@ bool Process__mark_child_wait_ready(ProcessPtr self, ProcessID child_pid, Proces
     return false;
 }
 
-bool Process__mark_signal_suspend_ready(ProcessPtr self)
+bool Process__mark_child_wait_ready(ProcessPtr self, ProcessID child_pid, ProcessGroupID child_process_group_id,
+                                    uint64_t event_type)
 {
+    return Thread__mark_child_wait_ready(&self->thread, child_pid, child_process_group_id, event_type);
+}
+
+bool Thread__mark_signal_suspend_ready(ThreadPtr self)
+{
+    ProcessPtr process = self->owner;
     critical_section(
-        self->lock,
+        process->lock,
         {
-            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0;
-                 index--)
+            for (int64_t index = (int64_t)ParkedOperations__len(&self->parked_operations) - 1; index >= 0; index--)
             {
                 match_optional(
                     ParkedOperations__at(&self->parked_operations, index),
@@ -1418,7 +1617,7 @@ bool Process__mark_signal_suspend_ready(ProcessPtr self)
                         {
                             ProcessSignal signal = 0;
                             match_optional(
-                                Process__take_pending_signal(self),
+                                Thread__take_pending_signal(self),
                                 some(pending)
                                 {
                                     signal = pending;
@@ -1429,7 +1628,7 @@ bool Process__mark_signal_suspend_ready(ProcessPtr self)
                                 }
                             );
                             ProcessSignalAction action =
-                                unwrap_optional(ProcessSignalActions__get(&self->signal_actions, signal),
+                                unwrap_optional(ProcessSignalActions__get(&process->signals.signal_actions, signal),
                                                 ProcessSignalAction__default());
                             if (action.handler == PROCESS_SIGNAL_IGNORE_HANDLER ||
                                 (action.handler == PROCESS_SIGNAL_DEFAULT_HANDLER &&
@@ -1453,12 +1652,18 @@ bool Process__mark_signal_suspend_ready(ProcessPtr self)
     return false;
 }
 
-bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
+bool Process__mark_signal_suspend_ready(ProcessPtr self)
+{
+    return Thread__mark_signal_suspend_ready(&self->thread);
+}
+
+bool Thread__wake_expired_sleep(ThreadPtr self, Tick current_tick)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
-            if (self->state != PROC_STATE_SLEEPING && self->state != PROC_STATE_WAITING)
+            if (self->state != PROC_STATE_SLEEPING && self->state != PROC_STATE_WAITING &&
+                self->state != PROC_STATE_STOPPED)
             {
                 cs_return(false);
             }
@@ -1470,7 +1675,9 @@ bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
                     some(parked_operation)
                     {
                         if (!((parked_operation->park_reason == PARK_SLEEP && self->state == PROC_STATE_SLEEPING) ||
-                              (parked_operation->park_reason == PARK_WAIT_QUEUE && self->state == PROC_STATE_WAITING)))
+                              (parked_operation->park_reason == PARK_WAIT_QUEUE && self->state == PROC_STATE_WAITING) ||
+                              (parked_operation->park_reason == PARK_WAIT_ATOMIC && !parked_operation->ready &&
+                               (self->state == PROC_STATE_WAITING || self->state == PROC_STATE_STOPPED))))
                         {
                             continue;
                         }
@@ -1481,16 +1688,26 @@ bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
                             {
                                 if (current_tick >= deadline)
                                 {
-                                parked_operation->return_code = Some(
-                                    ReturnCode, parked_operation->park_reason == PARK_WAIT_QUEUE ? QUEUE_WAIT_TIMEOUT
-                                                                                                 : PROCESS_SLEEP_OK);
-                                ParkedOperation__mark_ready(parked_operation);
-                                self->state = PROC_STATE_INTERRUPTED;
-                                if (parked_operation->park_reason == PARK_WAIT_QUEUE)
-                                {
-                                    QueueWaitUsage__wake(&self->queue_wait_usage, QUEUE_WAIT_TIMEOUT);
-                                }
-                                cs_return(true);
+                                    ReturnCode completion_code = PROCESS_SLEEP_OK;
+                                    if (parked_operation->park_reason == PARK_WAIT_QUEUE)
+                                    {
+                                        completion_code = QUEUE_WAIT_TIMEOUT;
+                                    }
+                                    else if (parked_operation->park_reason == PARK_WAIT_ATOMIC)
+                                    {
+                                        completion_code = THREAD_WAIT_TIMED_OUT;
+                                    }
+                                    parked_operation->return_code = Some(ReturnCode, completion_code);
+                                    ParkedOperation__mark_ready(parked_operation);
+                                    if (self->state != PROC_STATE_STOPPED)
+                                    {
+                                        self->state = PROC_STATE_INTERRUPTED;
+                                    }
+                                    if (parked_operation->park_reason == PARK_WAIT_QUEUE)
+                                    {
+                                        QueueWaitUsage__wake(&self->queue_wait_usage, QUEUE_WAIT_TIMEOUT);
+                                    }
+                                    cs_return(true);
                                 }
                             },
                             none_do_nothing()
@@ -1505,10 +1722,54 @@ bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
     return false;
 }
 
-bool Process__is_parked(ProcessPtr self)
+bool Process__wake_expired_sleep(ProcessPtr self, Tick current_tick)
+{
+    return Thread__wake_expired_sleep(&self->thread, current_tick);
+}
+
+typedef ParkedOperationPtr * ParkedOperationHandlePtr;
+
+static bool ParkedOperation__matches_atomic_wait(ParkedOperationHandlePtr self, void * context)
+{
+    ParkedOperationPtr operation = *self;
+    Address address = *(AddressPtr)context;
+    return operation->park_reason == PARK_WAIT_ATOMIC && !operation->ready &&
+           (Address)operation->operation_context == address;
+}
+
+bool Thread__wake_atomic_wait(ThreadPtr self, Address address)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
+        {
+            if (self->state == PROC_STATE_DEAD)
+            {
+                cs_return(false);
+            }
+            match_find_result(
+                ParkedOperations__find(&self->parked_operations, ParkedOperation__matches_atomic_wait, &address),
+                some(operation)
+                {
+                    operation->return_code = Some(ReturnCode, THREAD_WAIT_WOKEN);
+                    ParkedOperation__mark_ready(operation);
+                    if (self->state == PROC_STATE_WAITING)
+                    {
+                        self->state = PROC_STATE_INTERRUPTED;
+                    }
+                    cs_return(true);
+                },
+                none_do_nothing()
+            );
+        }
+    );
+
+    return false;
+}
+
+bool Thread__is_parked(ThreadPtr self)
+{
+    critical_section(
+        self->owner->lock,
         {
             cs_return(ParkedOperations__len(&self->parked_operations) > 0);
         }
@@ -1517,9 +1778,14 @@ bool Process__is_parked(ProcessPtr self)
     return false;
 }
 
+bool Process__is_parked(ProcessPtr self)
+{
+    return Thread__is_parked(&self->thread);
+}
+
 bool Process__is_handling_service_irq(ProcessPtr self)
 {
-    match_optional(self->service.active_irq_event,
+    match_optional(self->service_state.service.active_irq_event,
         some(event)
         {
             return true;
@@ -1539,36 +1805,39 @@ void Process__queue_signal(ProcessPtr self, ProcessSignal signal)
 {
     if (signal == PROCESS_SIGNAL_CONTINUE)
     {
-        __atomic_fetch_and(&self->pending_signals, ~ProcessSignal__stop_mask(), __ATOMIC_ACQ_REL);
-    }
-    else if ((ProcessSignal__stop_mask() & ProcessSignal__mask(signal)) != 0)
-    {
-        __atomic_fetch_and(&self->pending_signals, ~ProcessSignal__mask(PROCESS_SIGNAL_CONTINUE), __ATOMIC_ACQ_REL);
+        __atomic_fetch_and(&self->signals.pending_signals, ~ProcessSignal__stop_mask(), __ATOMIC_ACQ_REL);
     }
 
-    __atomic_fetch_or(&self->pending_signals, ProcessSignal__mask(signal), __ATOMIC_RELEASE);
+    else if ((ProcessSignal__stop_mask() & ProcessSignal__mask(signal)) != 0)
+    {
+        __atomic_fetch_and(&self->signals.pending_signals, ~ProcessSignal__mask(PROCESS_SIGNAL_CONTINUE),
+                           __ATOMIC_ACQ_REL);
+    }
+
+    __atomic_fetch_or(&self->signals.pending_signals, ProcessSignal__mask(signal), __ATOMIC_RELEASE);
 }
 
 bool Process__has_pending_signal(ProcessPtr self)
 {
-    return __atomic_load_n(&self->pending_signals, __ATOMIC_ACQUIRE) != 0;
+    return __atomic_load_n(&self->signals.pending_signals, __ATOMIC_ACQUIRE) != 0;
 }
 
 bool Process__has_pending_kill(ProcessPtr self)
 {
-    return (__atomic_load_n(&self->pending_signals, __ATOMIC_ACQUIRE) & ProcessSignal__mask(PROCESS_SIGNAL_KILL)) != 0;
+    return (__atomic_load_n(&self->signals.pending_signals, __ATOMIC_ACQUIRE) &
+            ProcessSignal__mask(PROCESS_SIGNAL_KILL)) != 0;
 }
 
 bool Process__has_pending_resume_signal(ProcessPtr self)
 {
     ProcessSignalMask resume = ProcessSignal__mask(PROCESS_SIGNAL_KILL) | ProcessSignal__mask(PROCESS_SIGNAL_CONTINUE);
-    return (__atomic_load_n(&self->pending_signals, __ATOMIC_ACQUIRE) & resume) != 0;
+    return (__atomic_load_n(&self->signals.pending_signals, __ATOMIC_ACQUIRE) & resume) != 0;
 }
 
-bool Process__can_resume_for_signal(ProcessPtr self)
+bool Thread__can_resume_for_signal(ThreadPtr self)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             match_optional(
                 ParkedOperations__at(&self->parked_operations, -1),
@@ -1576,12 +1845,13 @@ bool Process__can_resume_for_signal(ProcessPtr self)
                 {
                     if (operation->park_reason == PARK_WAIT_EXEC_LOAD)
                     {
-                        cs_return(Process__has_pending_kill(self));
+                        cs_return(Process__has_pending_kill(self->owner));
                     }
                 },
                 none_do_nothing()
             );
-            ProcessSignalMask pending = __atomic_load_n(&self->pending_signals, __ATOMIC_ACQUIRE);
+            ProcessSignalMask pending =
+                __atomic_load_n(&self->owner->signals.pending_signals, __ATOMIC_ACQUIRE);
             ProcessSignalMask unmaskable =
                 ProcessSignal__mask(PROCESS_SIGNAL_KILL) | ProcessSignal__mask(PROCESS_SIGNAL_STOP);
             cs_return((pending & (~self->signal_mask | unmaskable)) != 0);
@@ -1591,9 +1861,14 @@ bool Process__can_resume_for_signal(ProcessPtr self)
     return false;
 }
 
-Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self)
+bool Process__can_resume_for_signal(ProcessPtr self)
 {
-    ProcessSignalMask pending = __atomic_load_n(&self->pending_signals, __ATOMIC_ACQUIRE);
+    return Thread__can_resume_for_signal(&self->thread);
+}
+
+Optional(ProcessSignal) Thread__take_pending_signal(ThreadPtr self)
+{
+    ProcessSignalMask pending = __atomic_load_n(&self->owner->signals.pending_signals, __ATOMIC_ACQUIRE);
     ProcessSignalMask deliverable = pending & ~self->signal_mask;
     deliverable |= pending & (ProcessSignal__mask(PROCESS_SIGNAL_KILL) | ProcessSignal__mask(PROCESS_SIGNAL_STOP));
     if (deliverable == 0)
@@ -1603,7 +1878,8 @@ Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self)
 
     if ((deliverable & ProcessSignal__mask(PROCESS_SIGNAL_KILL)) != 0)
     {
-        __atomic_fetch_and(&self->pending_signals, ~ProcessSignal__mask(PROCESS_SIGNAL_KILL), __ATOMIC_ACQ_REL);
+        __atomic_fetch_and(&self->owner->signals.pending_signals, ~ProcessSignal__mask(PROCESS_SIGNAL_KILL),
+                           __ATOMIC_ACQ_REL);
         return Some(ProcessSignal, PROCESS_SIGNAL_KILL);
     }
 
@@ -1611,13 +1887,18 @@ Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self)
     {
         ProcessSignalMask mask = ProcessSignal__mask(signal);
         if ((deliverable & mask) != 0 &&
-            (__atomic_fetch_and(&self->pending_signals, ~mask, __ATOMIC_ACQ_REL) & mask) != 0)
+            (__atomic_fetch_and(&self->owner->signals.pending_signals, ~mask, __ATOMIC_ACQ_REL) & mask) != 0)
         {
             return Some(ProcessSignal, signal);
         }
     }
 
     return None(ProcessSignal);
+}
+
+Optional(ProcessSignal) Process__take_pending_signal(ProcessPtr self)
+{
+    return Thread__take_pending_signal(&self->thread);
 }
 
 static ProcessSignalAction ProcessSignalAction__default(void)
@@ -1630,8 +1911,8 @@ ProcessSignalAction Process__signal_action(ProcessPtr self, ProcessSignal signal
     ProcessSignalAction action;
     critical_section(
         self->lock,
-        action = unwrap_optional(ProcessSignalActions__get(&self->signal_actions, signal),
-                                                          ProcessSignalAction__default());
+                     action = unwrap_optional(ProcessSignalActions__get(&self->signals.signal_actions, signal),
+                                              ProcessSignalAction__default());
     )
     ;
     return action;
@@ -1651,7 +1932,7 @@ Result(ProcessSignalResult)
         self->lock,
         {
             match_result(
-                ProcessSignalActions__set(&self->signal_actions, signal, replacement),
+                ProcessSignalActions__set(&self->signals.signal_actions, signal, replacement),
                 success(_)
                 {
                     cs_return(Success(ProcessSignalResult, PROCESS_SIGNAL_OK));
@@ -1667,22 +1948,27 @@ Result(ProcessSignalResult)
     return Error(ProcessSignalResult, signal_frame_allocation_failed, PROCESS_SIGNAL_NO_MEMORY);
 }
 
-ProcessSignalMask Process__signal_mask(ProcessPtr self)
+ProcessSignalMask Thread__signal_mask(ThreadPtr self)
 {
     ProcessSignalMask mask;
     critical_section(
-        self->lock,
+        self->owner->lock,
         mask = self->signal_mask;
     )
     ;
     return mask;
 }
 
-Result(ProcessSignalResult) Process__set_signal_mask(ProcessPtr self, uint64_t operation, ProcessSignalMask mask)
+ProcessSignalMask Process__signal_mask(ProcessPtr self)
+{
+    return Thread__signal_mask(&self->thread);
+}
+
+Result(ProcessSignalResult) Thread__set_signal_mask(ThreadPtr self, uint64_t operation, ProcessSignalMask mask)
 {
     ProcessSignalMask requested = ProcessSignal__mask_without_unmaskable(mask);
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             switch (operation)
             {
@@ -1706,9 +1992,19 @@ Result(ProcessSignalResult) Process__set_signal_mask(ProcessPtr self, uint64_t o
     return Error(ProcessSignalResult, bstr("Invalid signal mask operation"), PROCESS_SIGNAL_INVALID_ARGUMENT);
 }
 
+Result(ProcessSignalResult) Process__set_signal_mask(ProcessPtr self, uint64_t operation, ProcessSignalMask mask)
+{
+    return Thread__set_signal_mask(&self->thread, operation, mask);
+}
+
+ProcessSignalMask Thread__pending_signal_mask(ThreadPtr self)
+{
+    return __atomic_load_n(&self->owner->signals.pending_signals, __ATOMIC_ACQUIRE) & self->signal_mask;
+}
+
 ProcessSignalMask Process__pending_signal_mask(ProcessPtr self)
 {
-    return __atomic_load_n(&self->pending_signals, __ATOMIC_ACQUIRE) & self->signal_mask;
+    return Thread__pending_signal_mask(&self->thread);
 }
 
 static bool ProcessSignal__default_is_ignored(ProcessSignal signal)
@@ -1729,10 +2025,10 @@ static bool ProcessSignal__restarts_wait(ParkReason reason)
 }
 
 static Optional(ParkedOperationPtr)
-    Process__interrupt_parked_operation(ProcessPtr self, ProcessContextPtr saved_context, uint64_t action_flags)
+    Thread__interrupt_parked_operation(ThreadPtr self, ThreadContextPtr saved_context, uint64_t action_flags)
 {
     critical_section(
-        self->lock,
+        self->owner->lock,
         {
             match_optional(
                 ParkedOperations__at(&self->parked_operations, -1),
@@ -1750,11 +2046,11 @@ static Optional(ParkedOperationPtr)
                             if ((action_flags & PROCESS_SIGNAL_ACTION_RESTART) != 0 &&
                                 ProcessSignal__restarts_wait(reason))
                             {
-                                ProcessContext__restart_syscall(saved_context);
+                                ThreadContext__restart_syscall(saved_context);
                             }
                             else
                             {
-                                ProcessContext__set_syscall_result(saved_context, SYSCALL_INTERRUPTED);
+                                ThreadContext__set_syscall_result(saved_context, SYSCALL_INTERRUPTED);
                             }
                             cs_return(Some(ParkedOperationPtr, interrupted));
                         },
@@ -1769,10 +2065,10 @@ static Optional(ParkedOperationPtr)
     return None(ParkedOperationPtr);
 }
 
-static Result(ProcessSignalDelivery) Process__enter_signal_handler(ProcessPtr self, ProcessContextPtr context,
-                                                                   ProcessSignal signal, ProcessSignalAction action)
+static Result(ProcessSignalDelivery) Thread__enter_signal_handler(ThreadPtr self, ThreadContextPtr context,
+                                                                  ProcessSignal signal, ProcessSignalAction action)
 {
-    ProcessContextPtr saved = ProcessContext__clone(self->kernel, context);
+    ThreadContextPtr saved = ThreadContext__clone(self->owner->kernel, context);
     ProcessSignalFrame frame = ProcessSignalFrame__new(saved, self->signal_mask);
 
     match_result(
@@ -1780,7 +2076,7 @@ static Result(ProcessSignalDelivery) Process__enter_signal_handler(ProcessPtr se
         success_do_nothing(),
         error(code, message)
         {
-            ProcessContext__dispose(saved);
+            ThreadContext__dispose(saved);
             return Error(ProcessSignalDelivery, message, PROCESS_SIGNAL_NO_MEMORY);
         }
     );
@@ -1796,7 +2092,7 @@ static Result(ProcessSignalDelivery) Process__enter_signal_handler(ProcessPtr se
     {
         ProcessSignalAction default_action = ProcessSignalAction__default();
         match_result(
-            ProcessSignalActions__set(&self->signal_actions, signal, default_action),
+            ProcessSignalActions__set(&self->owner->signals.signal_actions, signal, default_action),
             success_do_nothing(),
             error(code, message)
             {
@@ -1805,7 +2101,7 @@ static Result(ProcessSignalDelivery) Process__enter_signal_handler(ProcessPtr se
                     ProcessSignalFrames__remove_at(&self->signal_frames, -1),
                     some(removed)
                     {
-                        ProcessContext__dispose(removed.context);
+                        ThreadContext__dispose(removed.context);
                     },
                     none_do_nothing()
                 );
@@ -1814,20 +2110,20 @@ static Result(ProcessSignalDelivery) Process__enter_signal_handler(ProcessPtr se
         );
     }
 
-    ProcessContext__enter_signal(context, signal, action.handler, action.restorer);
+    ThreadContext__enter_signal(context, signal, action.handler, action.restorer);
     ProcessSignalDelivery delivery = ProcessSignalDelivery__new(PROCESS_SIGNAL_DELIVERY_HANDLER, signal);
-    delivery.interrupted_operation = Process__interrupt_parked_operation(self, saved, action.flags);
+    delivery.interrupted_operation = Thread__interrupt_parked_operation(self, saved, action.flags);
     return Success(ProcessSignalDelivery, delivery);
 }
 
-Result(ProcessSignalDelivery) Process__deliver_pending_signal(ProcessPtr self, ProcessContextPtr context)
+Result(ProcessSignalDelivery) Thread__deliver_pending_signal(ThreadPtr self, ThreadContextPtr context)
 {
     while (true)
     {
         ProcessSignal signal = 0;
         Optional(ProcessSignal) selected = None(ProcessSignal);
         critical_section(
-            self->lock,
+            self->owner->lock,
             {
                 match_optional(
                     self->forced_signal,
@@ -1843,7 +2139,7 @@ Result(ProcessSignalDelivery) Process__deliver_pending_signal(ProcessPtr self, P
 
         if (is_nothing(selected))
         {
-            selected = Process__take_pending_signal(self);
+            selected = Thread__take_pending_signal(self);
         }
         match_optional(
             selected,
@@ -1857,7 +2153,7 @@ Result(ProcessSignalDelivery) Process__deliver_pending_signal(ProcessPtr self, P
             }
         );
 
-        ProcessSignalAction action = Process__signal_action(self, signal);
+        ProcessSignalAction action = Process__signal_action(self->owner, signal);
         if (action.handler == PROCESS_SIGNAL_IGNORE_HANDLER ||
             (action.handler == PROCESS_SIGNAL_DEFAULT_HANDLER && ProcessSignal__default_is_ignored(signal)))
         {
@@ -1880,25 +2176,35 @@ Result(ProcessSignalDelivery) Process__deliver_pending_signal(ProcessPtr self, P
                            ProcessSignalDelivery__new(PROCESS_SIGNAL_DELIVERY_TERMINATE, signal));
         }
 
-        return Process__enter_signal_handler(self, context, signal, action);
+        return Thread__enter_signal_handler(self, context, signal, action);
     }
 }
 
-Result(ProcessSignalResult) Process__restore_signal_context(ProcessPtr self)
+Result(ProcessSignalDelivery) Process__deliver_pending_signal(ProcessPtr self, ThreadContextPtr context)
+{
+    return Thread__deliver_pending_signal(&self->thread, context);
+}
+
+Result(ProcessSignalResult) Thread__restore_signal_context(ThreadPtr self)
 {
     match_optional(
         ProcessSignalFrames__remove_at(&self->signal_frames, -1),
         some(frame)
         {
-            ProcessContext__copy(Process__required_context(self), frame.context);
+            ThreadContext__copy(Thread__required_context(self), frame.context);
             self->signal_mask = frame.mask;
-            ProcessContext__dispose(frame.context);
+            ThreadContext__dispose(frame.context);
             return Success(ProcessSignalResult, PROCESS_SIGNAL_OK);
         },
         none_do_nothing()
     );
 
     return Error(ProcessSignalResult, signal_frame_missing, PROCESS_SIGNAL_NO_FRAME);
+}
+
+Result(ProcessSignalResult) Process__restore_signal_context(ProcessPtr self)
+{
+    return Thread__restore_signal_context(&self->thread);
 }
 
 uint64_t Process__set_alarm(ProcessPtr self, uint64_t now_usec, uint64_t seconds)
@@ -1908,7 +2214,7 @@ uint64_t Process__set_alarm(ProcessPtr self, uint64_t now_usec, uint64_t seconds
         self->lock,
         {
             match_optional(
-                self->alarm_deadline_usec,
+                self->signals.alarm_deadline_usec,
                 some(deadline)
                 {
                     if (deadline > now_usec)
@@ -1918,9 +2224,9 @@ uint64_t Process__set_alarm(ProcessPtr self, uint64_t now_usec, uint64_t seconds
                 },
                 none_do_nothing()
             );
-            self->alarm_deadline_usec = seconds == 0
-                                            ? None(ProcessAlarmDeadline)
-                                            : Some(ProcessAlarmDeadline, now_usec + seconds * 1000000ULL);
+            self->signals.alarm_deadline_usec =
+                seconds == 0 ? None(ProcessAlarmDeadline)
+                             : Some(ProcessAlarmDeadline, now_usec + seconds * 1000000ULL);
         }
     );
 
@@ -1933,12 +2239,12 @@ bool Process__take_expired_alarm(ProcessPtr self, uint64_t now_usec)
         self->lock,
         {
             match_optional(
-                self->alarm_deadline_usec,
+                self->signals.alarm_deadline_usec,
                 some(deadline)
                 {
                     if (deadline <= now_usec)
                     {
-                        self->alarm_deadline_usec = None(ProcessAlarmDeadline);
+                        self->signals.alarm_deadline_usec = None(ProcessAlarmDeadline);
                         cs_return(true);
                     }
                 },
@@ -1955,7 +2261,7 @@ static Result(ProcessSignalResult) Process__reset_signal_state_for_exec(ProcessP
     ProcessSignalActions retained_actions = ProcessSignalActions__new();
     for_each_map(
         ProcessSignalActions,
-        self->signal_actions,
+        self->signals.signal_actions,
         index,
         signal,
         action,
@@ -1974,19 +2280,19 @@ static Result(ProcessSignalResult) Process__reset_signal_state_for_exec(ProcessP
         }
     );
 
-    while (ProcessSignalFrames__len(&self->signal_frames) > 0)
+    while (ProcessSignalFrames__len(&self->thread.signal_frames) > 0)
     {
         match_optional(
-            ProcessSignalFrames__remove_at(&self->signal_frames, -1),
+            ProcessSignalFrames__remove_at(&self->thread.signal_frames, -1),
             some(frame)
             {
-                ProcessContext__dispose(frame.context);
+                ThreadContext__dispose(frame.context);
             },
             none_do_nothing()
         );
     }
 
-    self->signal_actions = retained_actions;
+    self->signals.signal_actions = retained_actions;
     return Success(ProcessSignalResult, PROCESS_SIGNAL_OK);
 }
 
@@ -2020,7 +2326,7 @@ Result(ProcessSetupStatus) Process__dispose_owned_kernel_resources(ProcessPtr se
 
 Result(KAllocCode) Process__dispose_page_table(ProcessPtr self)
 {
-    return ProcessPageTable__dispose(&self->page_table, self->kernel);
+    return ProcessPageTable__dispose(&self->address_space.page_table, self->kernel);
 }
 
 typedef struct ProcessChildEventSelection
@@ -2063,6 +2369,7 @@ static bool ProcessChildEvent__matches_selection(ProcessChildEventPtr self, void
     {
         return (selection->options & PROCESS_CHILD_WAIT_CONTINUED) != 0;
     }
+
     return self->type == PROCESS_CHILD_EVENT_EXITED;
 }
 
@@ -2078,8 +2385,8 @@ Result(ProcessChildEvent) Process__pop_child_event(ProcessPtr self, int64_t chil
                 ProcessChildEvents__remove(&self->child_events, event),
                 success(code)
                 {
-                    self->children_user_usec += event.user_usec;
-                    self->children_system_usec += event.system_usec;
+                    self->accounting.children_user_usec += event.user_usec;
+                    self->accounting.children_system_usec += event.system_usec;
                     return Success(ProcessChildEvent, event);
                 },
                 error(code, message)
@@ -2102,7 +2409,7 @@ Result(CollectionCode) Process__push_child_event(ProcessPtr self, ConstProcessCh
 void Process__account_cpu_mode(ProcessPtr self, CPUUsageMode mode)
 {
     CPUTime now = CPU__time_usec();
-    CPUUsage__transition(&self->cpu_usage, now, Process__user_wait_usec(self, now), mode);
+    CPUUsage__transition(&self->accounting.cpu_usage, now, Process__user_wait_usec(self, now), mode);
 }
 
 Result(ProcessPtr) Process__setup(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent)
@@ -2111,9 +2418,9 @@ Result(ProcessPtr) Process__setup(KernelPtr kernel, ConstElfPtr binary, Optional
     return Process__setup_with_args(kernel, binary, parent, &arguments);
 }
 
-static Result(ProcessPtr)
-    Process__setup_with_startup(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
-                                OptionalPtr(ProcessID) pid, ConstProcessStartupInputPtr startup)
+static Result(ProcessPtr) Process__setup_image(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
+                                               OptionalPtr(ProcessID) pid, ConstProcessStartupInputPtr startup,
+                                               ConstThreadLocalImagePtr thread_local_image)
 {
     __d_println(PROCESS, "Process__spawn_from_elf");
     ExpandedSegmentArray expanded_elf = Elf__map(binary);
@@ -2186,6 +2493,7 @@ static Result(ProcessPtr)
                                                   &stack, parent, startup),
                         success(proc)
                         {
+                            proc->image.thread_local_image = *thread_local_image;
                             for_each_fa(
                                 ExpandedSegmentArray,
                                 expanded_elf,
@@ -2222,6 +2530,24 @@ static Result(ProcessPtr)
     return Error(ProcessPtr, bstr("Unknown error"), RESULT_UNKNOWN_ERROR_CODE);
 }
 
+static Result(ProcessPtr)
+    Process__setup_with_startup(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
+                                OptionalPtr(ProcessID) pid, ConstProcessStartupInputPtr startup)
+{
+    match_result(
+        Elf__thread_local_image(binary),
+        success(image)
+        {
+            return Process__setup_image(kernel, binary, parent, pid, startup, &image);
+        },
+        error(code, message)
+        {
+            return Error(ProcessPtr, message, PROCESS_FAILED_TO_SETUP);
+        }
+    );
+    return Error(ProcessPtr, bstr("Invalid executable TLS image"), PROCESS_FAILED_TO_SETUP);
+}
+
 Result(ProcessPtr) Process__setup_with_args(KernelPtr kernel, ConstElfPtr binary, OptionalPtr(ProcessPtr) parent,
                                             ConstProcessArgumentsPtr arguments)
 {
@@ -2254,73 +2580,84 @@ Result(ProcessPtr) Process__setup_overlay_candidate(ProcessPtr self, ConstElfPtr
     return Process__setup_with_startup(self->kernel, binary, &parent, &Some(ProcessID, self->pid), &startup);
 }
 
-typedef struct ProcessImage
+typedef struct ThreadImageSnapshot
+{
+    Optional(ThreadContextPtr) context;
+    Stack stack;
+} ThreadImageSnapshot;
+
+typedef struct ProcessImageSnapshot
 {
     ProcessPageTable page_table;
-    Optional(ProcessContextPtr) context;
-    Stack stack;
+    ThreadImageSnapshot thread;
     UserAddress entry_point;
+    ThreadLocalImage thread_local_image;
     BString name;
     uint64_t startup_argument_count;
     Address heap_break;
     Address heap_mapped_end;
     UserAllocations user_allocations;
     UserMappings user_mappings;
-    ProcessVirtioDevices virtio_devices;
+    ClaimedMmioBases claimed_mmio_bases;
     SpawnStdio startup_stdio;
     Optional(ProcessAbort) abort;
     Optional(UserAddress) queue_wait_control;
     Optional(UserAddress) ipc_doorbell;
     Optional(UserAddress) idle_debug_address;
-} ProcessImage;
+} ProcessImageSnapshot;
 
-typedef const ProcessImage * ConstProcessImagePtr;
+typedef const ProcessImageSnapshot * ConstProcessImageSnapshotPtr;
 
-static ProcessImage ProcessImage__new(ProcessPtr self)
+static ProcessImageSnapshot ProcessImageSnapshot__new(ProcessPtr self)
 {
-    return (ProcessImage){
-        .page_table = self->page_table,
-        .context = self->context,
-        .stack = self->stack,
-        .entry_point = self->entry_point,
+    return (ProcessImageSnapshot){
+        .page_table = self->address_space.page_table,
+        .thread =
+            {
+                .context = self->thread.context,
+                .stack = self->thread.stack,
+            },
+        .entry_point = self->image.entry_point,
+        .thread_local_image = self->image.thread_local_image,
         .name = self->name,
-        .startup_argument_count = self->startup_argument_count,
-        .heap_break = self->heap_break,
-        .heap_mapped_end = self->heap_mapped_end,
-        .user_allocations = self->user_allocations,
-        .user_mappings = self->user_mappings,
-        .virtio_devices = self->virtio_devices,
-        .startup_stdio = self->startup_stdio,
-        .abort = self->abort,
-        .queue_wait_control = self->queue_wait_control,
-        .ipc_doorbell = self->ipc_doorbell,
-        .idle_debug_address = self->idle_debug_address,
+        .startup_argument_count = self->image.startup_argument_count,
+        .heap_break = self->address_space.heap_break,
+        .heap_mapped_end = self->address_space.heap_mapped_end,
+        .user_allocations = self->address_space.user_allocations,
+        .user_mappings = self->address_space.user_mappings,
+        .claimed_mmio_bases = self->address_space.claimed_mmio_bases,
+        .startup_stdio = self->image.startup_stdio,
+        .abort = self->lifecycle.abort,
+        .queue_wait_control = self->ipc.queue_wait_control,
+        .ipc_doorbell = self->ipc.ipc_doorbell,
+        .idle_debug_address = self->address_space.idle_debug_address,
     };
 }
 
-static void ProcessImage__install(ProcessPtr self, ConstProcessImagePtr image)
+static void ProcessImageSnapshot__install(ProcessPtr self, ConstProcessImageSnapshotPtr image)
 {
-    self->page_table = image->page_table;
-    self->context = image->context;
-    self->stack = image->stack;
-    self->entry_point = image->entry_point;
+    self->address_space.page_table = image->page_table;
+    self->thread.context = image->thread.context;
+    self->thread.stack = image->thread.stack;
+    self->image.entry_point = image->entry_point;
+    self->image.thread_local_image = image->thread_local_image;
     self->name = image->name;
-    self->startup_argument_count = image->startup_argument_count;
-    self->heap_break = image->heap_break;
-    self->heap_mapped_end = image->heap_mapped_end;
-    self->user_allocations = image->user_allocations;
-    self->user_mappings = image->user_mappings;
-    self->virtio_devices = image->virtio_devices;
-    self->startup_stdio = image->startup_stdio;
-    self->abort = image->abort;
-    self->queue_wait_control = image->queue_wait_control;
-    self->ipc_doorbell = image->ipc_doorbell;
-    self->idle_debug_address = image->idle_debug_address;
+    self->image.startup_argument_count = image->startup_argument_count;
+    self->address_space.heap_break = image->heap_break;
+    self->address_space.heap_mapped_end = image->heap_mapped_end;
+    self->address_space.user_allocations = image->user_allocations;
+    self->address_space.user_mappings = image->user_mappings;
+    self->address_space.claimed_mmio_bases = image->claimed_mmio_bases;
+    self->image.startup_stdio = image->startup_stdio;
+    self->lifecycle.abort = image->abort;
+    self->ipc.queue_wait_control = image->queue_wait_control;
+    self->ipc.ipc_doorbell = image->ipc_doorbell;
+    self->address_space.idle_debug_address = image->idle_debug_address;
 }
 
 Result(ProcessSetupStatus) Process__commit_overlay(ProcessPtr self, ProcessPtr candidate)
 {
-    candidate->startup_stdio = self->startup_stdio;
+    candidate->image.startup_stdio = self->image.startup_stdio;
     match_result(
         Process__reset_signal_state_for_exec(self),
         success_do_nothing(),
@@ -2329,11 +2666,11 @@ Result(ProcessSetupStatus) Process__commit_overlay(ProcessPtr self, ProcessPtr c
             return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
         }
     );
-    ProcessImage old_image = ProcessImage__new(self);
-    ProcessImage new_image = ProcessImage__new(candidate);
-    ProcessImage__install(self, &new_image);
-    ProcessImage__install(candidate, &old_image);
-    self->execed_since_fork = true;
+    ProcessImageSnapshot old_image = ProcessImageSnapshot__new(self);
+    ProcessImageSnapshot new_image = ProcessImageSnapshot__new(candidate);
+    ProcessImageSnapshot__install(self, &new_image);
+    ProcessImageSnapshot__install(candidate, &old_image);
+    self->lifecycle.execed_since_fork = true;
     Process__prepare_startup_stdio(self);
     Process__activate_address_space(self);
 
@@ -2364,16 +2701,15 @@ Result(ProcessSetupStatus) Process__commit_overlay(ProcessPtr self, ProcessPtr c
     return Success(ProcessSetupStatus, PROCESS_SETUP);
 }
 
-Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
+Result(ProcessSetupStatus) Thread__dispose_exit_resources(ThreadPtr self)
 {
-    Process__abort_pending_fork(self);
     while (ProcessSignalFrames__len(&self->signal_frames) > 0)
     {
         match_optional(
             ProcessSignalFrames__remove_at(&self->signal_frames, -1),
             some(frame)
             {
-                ProcessContext__dispose(frame.context);
+                ThreadContext__dispose(frame.context);
             },
             none_do_nothing()
         );
@@ -2387,7 +2723,6 @@ Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
             return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
         }
     );
-
     while (ParkedOperations__len(&self->parked_operations) > 0)
     {
         match_optional(
@@ -2408,31 +2743,89 @@ Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
             return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
         }
     );
-
-    match_result(
-        UserAllocations__dispose(&self->user_allocations),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
-        }
-    );
-
-    match_result(
-        UserMappings__dispose(&self->user_mappings),
-        success_do_nothing(),
-        error(code, message)
-        {
-            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
-        }
-    );
-
-    match_optional(self->context,
+    match_optional(
+        self->context,
         some(context)
         {
-            ProcessContext__dispose(context);
+            ThreadContext__dispose(context);
+            self->context = None(ThreadContextPtr);
         },
         none_do_nothing()
+    );
+    return Success(ProcessSetupStatus, PROCESS_SETUP);
+}
+
+Result(ProcessSetupStatus) Process__dispose(ProcessPtr self)
+{
+    Process__abort_all_pending_forks(self);
+    match_result(
+        LiveChildren__dispose(&self->live_children),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
+    );
+    match_result(
+        PendingForkChildren__dispose(&self->pending_fork_children),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
+    );
+    for_each_ll(
+        ProcessThreads,
+        self->threads,
+        thread,
+        {
+            match_result(
+                Thread__dispose_exit_resources(thread),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+                }
+            );
+            if (thread->owns_storage)
+            {
+                match_result(
+                    Kernel__free(addr(thread)),
+                    success_do_nothing(),
+                    error(code, message)
+                    {
+                        return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+                    }
+                );
+            }
+        }
+    );
+
+    match_result(
+        UserAllocations__dispose(&self->address_space.user_allocations),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
+    );
+
+    match_result(
+        UserMappings__dispose(&self->address_space.user_mappings),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
+    );
+
+    match_result(
+        ProcessThreads__dispose(&self->threads),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessSetupStatus, message, PROCESS_FAILED_TO_SETUP);
+        }
     );
     match_result(
         Kernel__free(addr(self)),
@@ -2453,7 +2846,7 @@ Result(ProcessMemoryCode)
     UserMapping mapping = UserMapping__new(address, allocation.size);
 
     match_result(
-        UserMappings__push(&self->user_mappings, mapping),
+        UserMappings__push(&self->address_space.user_mappings, mapping),
         success_do_nothing(),
         error(code, message)
         {
@@ -2462,18 +2855,18 @@ Result(ProcessMemoryCode)
     );
 
     match_result(
-        UserAllocations__push(&self->user_allocations, allocation),
+        UserAllocations__push(&self->address_space.user_allocations, allocation),
         success(_)
         {
             __d_printf(MEMORY, "process alloc pid=%i name=%s type=%s user=%p kernel=%p phys=%p size=%i tracked=%i\n",
                        self->pid, cstr(self->name), UserAllocationType__name(type), address.virtual_addr,
                        address.kernel_addr.virtual_addr, address.kernel_addr.phys_addr, allocation.size,
-                       UserAllocations__len(&self->user_allocations));
+                       UserAllocations__len(&self->address_space.user_allocations));
             return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
         },
         error(code, message)
         {
-            UserMappings__remove_at(&self->user_mappings, -1);
+            UserMappings__remove_at(&self->address_space.user_mappings, -1);
             __d_printf(MEMORY,
                        "process alloc tracking failed pid=%i name=%s type=%s user=%p kernel=%p size=%i code=%i\n",
                        self->pid, cstr(self->name), UserAllocationType__name(type), address.virtual_addr,
@@ -2489,7 +2882,7 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
 {
     for_each_ll(
         UserAllocations,
-        self->user_allocations,
+        self->address_space.user_allocations,
         allocation,
         {
             Address start = allocation.address.virtual_addr;
@@ -2498,7 +2891,7 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
                 Arch__is_claimable_virtio_device(mapping))
             {
                 match_optional(
-                    ProcessVirtioDevices__find_item(&self->virtio_devices, mapping),
+                    ClaimedMmioBases__find_item(&self->address_space.claimed_mmio_bases, mapping),
                     some(index)
                     {
                         return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
@@ -2506,7 +2899,7 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
                     none_do_nothing()
                 );
                 match_result(
-                    ProcessVirtioDevices__push(&self->virtio_devices, mapping),
+                    ClaimedMmioBases__push(&self->address_space.claimed_mmio_bases, mapping),
                     success(_)
                     {
                         return Success(ProcessMemoryCode, PROCESS_MEMORY_OK);
@@ -2526,16 +2919,16 @@ Result(ProcessMemoryCode) Process__claim_virtio_device(ProcessPtr self, Address 
 void Process__quiesce_device(ProcessPtr self)
 {
     for_each_fa_ptr(
-        ProcessVirtioDevices,
-        &self->virtio_devices,
+        ClaimedMmioBases,
+        &self->address_space.claimed_mmio_bases,
         index,
         device,
         {
-            Arch__reset_virtio_device(device, self->page_table.root.phys_addr);
+            Arch__reset_virtio_device(device, self->address_space.page_table.root.phys_addr);
         }
     );
 
-    self->virtio_devices = ProcessVirtioDevices__new();
+    self->address_space.claimed_mmio_bases = ClaimedMmioBases__new();
 }
 
 Result(Address) Process__device_address(ProcessPtr self, Address virtual_address)
@@ -2547,7 +2940,7 @@ Result(Address) Process__device_address(ProcessPtr self, Address virtual_address
 
     for_each_ll(
         UserAllocations,
-        self->user_allocations,
+        self->address_space.user_allocations,
         allocation,
         {
             Address start = allocation.address.virtual_addr;
@@ -2585,7 +2978,7 @@ static Optional(UserAddress)
 
     UserAllocationRangeMatch range = UserAllocationRangeMatch__new(virtual_address, size);
     match_find_result_ptr(
-        UserAllocations__find(&self->user_allocations, allocation_contains_range, &range),
+        UserAllocations__find(&self->address_space.user_allocations, allocation_contains_range, &range),
         some(allocation)
         {
             bool permitted = require_write ? allocation->address.write : allocation->address.read;
@@ -2620,7 +3013,7 @@ Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, A
 
     UserAllocationRangeMatch range = UserAllocationRangeMatch__new(virtual_address, size);
     match_find_result_ptr(
-        UserMappings__find(&self->user_mappings, mapping_contains_range, &range),
+        UserMappings__find(&self->address_space.user_mappings, mapping_contains_range, &range),
         some(mapping)
         {
             if (!mapping->address.write)
@@ -2628,7 +3021,7 @@ Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, A
                 return None(KernelAddress);
             }
             match_find_result_ptr(
-                UserAllocations__find(&self->user_allocations, allocation_contains_range, &range),
+                UserAllocations__find(&self->address_space.user_allocations, allocation_contains_range, &range),
                 some(allocation)
                 {
                     if (allocation->address.kernel_addr.valid)
@@ -2650,10 +3043,32 @@ Optional(KernelAddress) Process__writable_user_kernel_mapping(ProcessPtr self, A
 typedef Result(UserAddress) (*ProcessUserAllocator)(Address virtual_address, size_t size, bool read, bool write,
                                                     bool execute);
 
+Optional(KernelAddress) Process__atomic_wait_mapping(ProcessPtr self, Address virtual_address)
+{
+    if (virtual_address % _Alignof(ThreadWaitValue) != 0)
+    {
+        return None(KernelAddress);
+    }
+    UserAllocationRangeMatch range = UserAllocationRangeMatch__new(virtual_address, sizeof(ThreadWaitValue));
+    match_find_result_ptr(
+        UserAllocations__find(&self->address_space.user_allocations, allocation_contains_range, &range),
+        some(allocation)
+        {
+            if (allocation->type == USER_ALLOCATION_ELF || allocation->type == USER_ALLOCATION_STACK ||
+                allocation->type == USER_ALLOCATION_HEAP || allocation->type == USER_ALLOCATION_DYNAMIC)
+            {
+                return Process__writable_user_kernel_mapping(self, virtual_address, sizeof(ThreadWaitValue));
+            }
+        },
+        none_do_nothing()
+    );
+    return None(KernelAddress);
+}
+
 static Result(UserAddress)
     Process__install_dynamic_allocation(ProcessPtr self, UserAddress allocation, size_t allocation_size)
 {
-    PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
+    PageTable__map(&self->address_space.page_table, self->kernel, allocation, allocation_size);
 
     match_result(
         Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC),
@@ -2663,7 +3078,7 @@ static Result(UserAddress)
         },
         error(code, message)
         {
-            PageTable__unmap(&self->page_table, self->kernel, allocation.virtual_addr, allocation_size);
+            PageTable__unmap(&self->address_space.page_table, self->kernel, allocation.virtual_addr, allocation_size);
             Kernel__free(allocation.kernel_addr.virtual_addr);
             return Error(UserAddress, message, code);
         }
@@ -2790,6 +3205,7 @@ static Optional(UserAddress) Process__protected_address(UserAddress address, Mem
     case MEM_PAGE_READ_EXECUTE:
         return Some(UserAddress, UserAddress__new(address.virtual_addr, address.kernel_addr, true, false, true, true));
     }
+
     return None(UserAddress);
 }
 
@@ -2800,9 +3216,10 @@ Result(ProcessMemoryCode)
     {
         return Error(ProcessMemoryCode, invalid_user_allocation, PROCESS_MEMORY_NOT_FOUND);
     }
+
     UserAllocationRangeMatch range = UserAllocationRangeMatch__new(virtual_address, size);
     match_find_result_ptr(
-        UserAllocations__find(&self->user_allocations, allocation_contains_range, &range),
+        UserAllocations__find(&self->address_space.user_allocations, allocation_contains_range, &range),
         some(allocation)
         {
             if (allocation->type != USER_ALLOCATION_DYNAMIC)
@@ -2820,7 +3237,7 @@ Result(ProcessMemoryCode)
                     size_t protected_size = 0;
                     for_each_ll(
                         UserMappings,
-                        self->user_mappings,
+                        self->address_space.user_mappings,
                         mapping,
                         {
                             Address mapping_start = mapping.address.virtual_addr;
@@ -2892,9 +3309,9 @@ Result(ProcessMemoryCode)
                     {
                         Arch__sync_instruction_memory(address.kernel_addr.virtual_addr, size);
                     }
-                    PageTable__protect(&self->page_table, self->kernel, address, size);
-                    UserMappings previous = self->user_mappings;
-                    self->user_mappings = replacement;
+                    PageTable__protect(&self->address_space.page_table, self->kernel, address, size);
+                    UserMappings previous = self->address_space.user_mappings;
+                    self->address_space.user_mappings = replacement;
                     UserMappings__dispose(&previous);
                     if (virtual_address == allocation->address.virtual_addr && size == allocation->size)
                     {
@@ -2953,11 +3370,11 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
     UserAllocationRangeMatch range = UserAllocationRangeMatch__new(source_base, allocation_size);
 
     match_find_result_ptr(
-        UserAllocations__find(&source->user_allocations, allocation_contains_range, &range),
+        UserAllocations__find(&source->address_space.user_allocations, allocation_contains_range, &range),
         some(allocation_match)
         {
             match_optional(
-                source->queue_wait_control,
+                source->ipc.queue_wait_control,
                 some(control)
                 {
                     if (control.virtual_addr == allocation_match->address.virtual_addr)
@@ -2968,7 +3385,7 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
                 none_do_nothing()
             );
             match_optional(
-                source->ipc_doorbell,
+                source->ipc.ipc_doorbell,
                 some(doorbell)
                 {
                     if (doorbell.virtual_addr == allocation_match->address.virtual_addr)
@@ -2992,7 +3409,7 @@ Result(SharedUserPages) Process__map_shared_user_pages_with_allocation(ProcessPt
             allocation_kernel_address.valid = allocation_match->address.kernel_addr.valid;
             UserAddress allocation = UserAddress__new(target_base, allocation_kernel_address, true, true, false, true);
 
-            PageTable__map_shared(&self->page_table, self->kernel, allocation, allocation_size);
+            PageTable__map_shared(&self->address_space.page_table, self->kernel, allocation, allocation_size);
             match_result(
                 Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_SHARED),
                 success(_)
@@ -3038,7 +3455,7 @@ Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
     state->before_wfi_count = 0;
     state->after_wfi_count = 0;
 
-    PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
+    PageTable__map(&self->address_space.page_table, self->kernel, allocation, allocation_size);
 
     match_result(
         Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_DYNAMIC),
@@ -3049,7 +3466,7 @@ Result(UserAddress) Process__map_idle_debug_page(ProcessPtr self)
         }
     );
 
-    self->idle_debug_address = Some(UserAddress, allocation);
+    self->address_space.idle_debug_address = Some(UserAddress, allocation);
     return Success(UserAddress, allocation);
 }
 
@@ -3085,7 +3502,7 @@ static Result(UserAddress)
 
     if (install_page_mapping)
     {
-        PageTable__map_mmio(&self->page_table, self->kernel, mapping, size);
+        PageTable__map_mmio(&self->address_space.page_table, self->kernel, mapping, size);
     }
 
     match_result(
@@ -3115,7 +3532,7 @@ Result(UserAddress) Process__map_trapped_mmio(ProcessPtr self, Address physical,
 
 Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
 {
-    Address old_break = self->heap_break;
+    Address old_break = self->address_space.heap_break;
     Address new_break;
 
     if (increment < 0)
@@ -3128,6 +3545,7 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
 
         new_break = old_break - decrement;
     }
+
     else
     {
         uint64_t grow = (uint64_t)increment;
@@ -3143,24 +3561,25 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
         return Error(Address, invalid_heap_break, PROCESS_MEMORY_INVALID_SIZE);
     }
 
-    if (new_break > self->heap_mapped_end)
+    if (new_break > self->address_space.heap_mapped_end)
     {
         Address mapped_end = Process__page_aligned_size(new_break);
-        size_t allocation_size = mapped_end - self->heap_mapped_end;
+        size_t allocation_size = mapped_end - self->address_space.heap_mapped_end;
         match_result(
-            Kernel__try_alloc_user(self->heap_mapped_end, allocation_size, true, true, false),
+            Kernel__try_alloc_user(self->address_space.heap_mapped_end, allocation_size, true, true, false),
             success(allocation)
             {
-                PageTable__map(&self->page_table, self->kernel, allocation, allocation_size);
+                PageTable__map(&self->address_space.page_table, self->kernel, allocation, allocation_size);
                 match_result(
                     Process__record_user_allocation(self, allocation, allocation_size, USER_ALLOCATION_HEAP),
                     success(_)
                     {
-                        self->heap_mapped_end = mapped_end;
+                        self->address_space.heap_mapped_end = mapped_end;
                     },
                     error(code, message)
                     {
-                        PageTable__unmap(&self->page_table, self->kernel, allocation.virtual_addr, allocation_size);
+                        PageTable__unmap(&self->address_space.page_table, self->kernel, allocation.virtual_addr,
+                                         allocation_size);
                         Kernel__free(allocation.kernel_addr.virtual_addr);
                         return Error(Address, message, code);
                     }
@@ -3173,19 +3592,19 @@ Result(Address) Process__sbrk(ProcessPtr self, int64_t increment)
         );
     }
 
-    self->heap_break = new_break;
+    self->address_space.heap_break = new_break;
     return Success(Address, old_break);
 }
 
 static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr self, ListIndex index)
 {
     match_optional(
-        UserAllocations__at(&self->user_allocations, index),
+        UserAllocations__at(&self->address_space.user_allocations, index),
         some(allocation)
         {
             for_each_fa_ptr(
-                ProcessVirtioDevices,
-                &self->virtio_devices,
+                ClaimedMmioBases,
+                &self->address_space.claimed_mmio_bases,
                 device_index,
                 device,
                 {
@@ -3201,20 +3620,22 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
                        self->pid, cstr(self->name), UserAllocationType__name(allocation.type),
                        allocation.address.virtual_addr, allocation.address.kernel_addr.virtual_addr,
                        allocation.address.kernel_addr.phys_addr, allocation.size,
-                       UserAllocations__len(&self->user_allocations));
-            PageTable__unmap(&self->page_table, self->kernel, allocation.address.virtual_addr, allocation.size);
+                       UserAllocations__len(&self->address_space.user_allocations));
+            PageTable__unmap(&self->address_space.page_table, self->kernel, allocation.address.virtual_addr,
+                             allocation.size);
             Address kernel_virtual = allocation.address.kernel_addr.virtual_addr;
 
             ListIndex mapping_index = 0;
             Address allocation_end = allocation.address.virtual_addr + allocation.size;
-            while ((size_t)mapping_index < UserMappings__len(&self->user_mappings))
+            while ((size_t)mapping_index < UserMappings__len(&self->address_space.user_mappings))
             {
-                UserMapping mapping = unwrap_optional(UserMappings__at(&self->user_mappings, mapping_index),
-                                                      UserMapping__new(NULL_USER_ADDRESS, 0));
+                UserMapping mapping =
+                    unwrap_optional(UserMappings__at(&self->address_space.user_mappings, mapping_index),
+                                    UserMapping__new(NULL_USER_ADDRESS, 0));
                 if (mapping.address.virtual_addr >= allocation.address.virtual_addr &&
                     mapping.address.virtual_addr < allocation_end)
                 {
-                    UserMappings__remove_at(&self->user_mappings, mapping_index);
+                    UserMappings__remove_at(&self->address_space.user_mappings, mapping_index);
                 }
                 else
                 {
@@ -3222,7 +3643,7 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
                 }
             }
 
-            UserAllocations__remove_at(&self->user_allocations, index);
+            UserAllocations__remove_at(&self->address_space.user_allocations, index);
 
             if (allocation.type == USER_ALLOCATION_MMIO || allocation.type == USER_ALLOCATION_SHARED)
             {
@@ -3250,7 +3671,7 @@ static Result(ProcessMemoryCode) Process__free_user_allocation_at(ProcessPtr sel
 Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virtual_address)
 {
     match_optional(
-        self->queue_wait_control,
+        self->ipc.queue_wait_control,
         some(mapping)
         {
             if (mapping.virtual_addr == virtual_address)
@@ -3261,7 +3682,7 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
         none_do_nothing()
     );
     match_optional(
-        self->ipc_doorbell,
+        self->ipc.ipc_doorbell,
         some(mapping)
         {
             if (mapping.virtual_addr == virtual_address)
@@ -3272,7 +3693,7 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
         none_do_nothing()
     );
     match_optional(
-        UserAllocations__find(&self->user_allocations, allocation_matches_virtual, &virtual_address),
+        UserAllocations__find(&self->address_space.user_allocations, allocation_matches_virtual, &virtual_address),
         some(found)
         {
             if (found.value->type == USER_ALLOCATION_ELF || found.value->type == USER_ALLOCATION_STACK ||
@@ -3294,10 +3715,10 @@ Result(ProcessMemoryCode) Process__free_user_pages(ProcessPtr self, Address virt
 
 Result(ProcessMemoryCode) Process__dispose_user_allocations(ProcessPtr self)
 {
-    self->queue_wait_control = None(UserAddress);
-    self->ipc_doorbell = None(UserAddress);
+    self->ipc.queue_wait_control = None(UserAddress);
+    self->ipc.ipc_doorbell = None(UserAddress);
     Process__quiesce_device(self);
-    while (self->user_allocations.len > 0)
+    while (self->address_space.user_allocations.len > 0)
     {
         match_result(
             Process__free_user_allocation_at(self, 0),
@@ -3322,11 +3743,11 @@ static Result(SpawnFileDescriptor) Process__startup_endpoint(ProcessPtr self, Sp
     switch (descriptor)
     {
     case 0:
-        return Success(SpawnFileDescriptor, SpawnStdio__stdin_fd(self->startup_stdio));
+        return Success(SpawnFileDescriptor, SpawnStdio__stdin_fd(self->image.startup_stdio));
     case 1:
-        return Success(SpawnFileDescriptor, SpawnStdio__stdout_fd(self->startup_stdio));
+        return Success(SpawnFileDescriptor, SpawnStdio__stdout_fd(self->image.startup_stdio));
     case 2:
-        return Success(SpawnFileDescriptor, SpawnStdio__stderr_fd(self->startup_stdio));
+        return Success(SpawnFileDescriptor, SpawnStdio__stderr_fd(self->image.startup_stdio));
     default:
         return Error(SpawnFileDescriptor, bstr("Userspace handle transfer is not supported"), SPAWN_FAILED);
     }
@@ -3336,7 +3757,7 @@ Result(SpawnStdio) Process__stdio_for_spawn(ProcessPtr self, ConstSpawnStdioPtr 
 {
     if (!SpawnStdio__is_present(*requested))
     {
-        return Success(SpawnStdio, self->startup_stdio);
+        return Success(SpawnStdio, self->image.startup_stdio);
     }
 
     match_result(
@@ -3377,6 +3798,7 @@ Result(SpawnStdio) Process__stdio_for_spawn(ProcessPtr self, ConstSpawnStdioPtr 
 
 void Process__prepare_startup_stdio(ProcessPtr self)
 {
-    Process__set_startup_stdio(self, SpawnStdio__stdin_fd(self->startup_stdio),
-                               SpawnStdio__stdout_fd(self->startup_stdio), SpawnStdio__stderr_fd(self->startup_stdio));
+    Process__set_startup_stdio(self, SpawnStdio__stdin_fd(self->image.startup_stdio),
+                               SpawnStdio__stdout_fd(self->image.startup_stdio),
+                               SpawnStdio__stderr_fd(self->image.startup_stdio));
 }

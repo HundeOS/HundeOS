@@ -66,7 +66,7 @@ impl Buffer {
             u64::try_from(bytes.len()).map_err(|_| IoError(SERVICE_INVALID_BUFFER))?,
         )?;
         let target = usize::try_from(address).map_err(|_| IoError(SERVICE_INVALID_BUFFER))?;
-        unsafe { core::ptr::copy(bytes.as_ptr(), target as *mut u8, bytes.len()) };
+        unsafe { crate::native::copy_to_mapped(target as *mut u8, bytes) };
         Ok(())
     }
 
@@ -169,7 +169,7 @@ pub fn register(name: &[u8], sectors: u64) -> Result<(), IoError> {
 }
 
 pub fn monotonic_usec() -> u64 {
-    unsafe { hunde_block_driver_monotonic_usec() }
+    crate::runtime::monotonic_usec()
 }
 
 pub fn sleep_usec(usec: u64) -> Result<(), IoError> {
@@ -208,7 +208,6 @@ unsafe extern "C" {
         offset: u64,
         length: u64,
     ) -> i64;
-    fn hunde_block_driver_monotonic_usec() -> u64;
     fn hunde_block_driver_record(blocks: u64, device_usec: u64, succeeded: u32);
 }
 

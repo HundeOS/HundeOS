@@ -78,8 +78,8 @@ void test_full_device_registry_does_not_replace_an_existing_device(void)
 
 void test_device_registry_maps_read_only_and_non_executable(void)
 {
-    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), DEVICE_REGISTRY_VADDR,
-                                          true, false, false, DEVICE_REGISTRY_SIZE));
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                          DEVICE_REGISTRY_VADDR, true, false, false, DEVICE_REGISTRY_SIZE));
     TEST_ASSERT_TRUE(kernel->device_registry.mapping.read);
     TEST_ASSERT_FALSE(kernel->device_registry.mapping.write);
     TEST_ASSERT_FALSE(kernel->device_registry.mapping.execute);

@@ -1,0 +1,22 @@
+[package]
+name = "hunde-network-nic-probe"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[[bin]]
+name = "network-peer"
+path = "src/peer.rs"
+
+[features]
+executable = []
+
+[dependencies]
+hunde = { path = "../../lib/hunde" }
+hunde-network = { path = "../../services/hunde-network" }
+smoltcp = { version = "=0.14.0", default-features = false, features = ["alloc", "medium-ethernet", "proto-ipv4", "socket-tcp", "socket-tcp-reno", "socket-udp", "socket-icmp", "auto-icmp-echo-reply"] }
+
+[lints]
+workspace = true

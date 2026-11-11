@@ -6,8 +6,8 @@
 #include "boot_info.h"
 #include "syscalls/io.h"
 
-#define HUNDE_IO_COMPONENT_VERSION 6U
-#define HUNDE_IO_COMPONENT_ENTRY "hunde_io_component_entry_v6"
+#define HUNDE_IO_COMPONENT_VERSION 7U
+#define HUNDE_IO_COMPONENT_ENTRY "hunde_io_component_entry_v7"
 #define HUNDE_IO_PENDING 2U
 
 typedef void * (*HundeHostAllocate)(uint64_t size, uint64_t alignment);
@@ -95,24 +95,33 @@ typedef struct HundeIOCompletion
 typedef HundeIOCompletion (*HundeIOExecute)(HundeComponentContext context, ConstHundeIORequestV6Ptr request);
 typedef HundeStatusResult (*HundeIODisconnect)(HundeComponentContext context, uint64_t session);
 
-typedef struct HundeIOComponentV6
+typedef struct HundeIOSchedule
+{
+    uint64_t worked;
+    uint64_t deadline_usec;
+} HundeIOSchedule;
+
+typedef HundeIOSchedule (*HundeIOAdvance)(HundeComponentContext context, uint64_t now_usec);
+
+typedef struct HundeIOComponentV7
 {
     HundeAbiHeader header;
     HundeComponentContext context;
     HundeIOExecute execute;
     HundeIODisconnect disconnect;
     HundeComponentDispose dispose;
-} HundeIOComponentV6;
+    HundeIOAdvance advance;
+} HundeIOComponentV7;
 
 typedef struct HundeIOComponentLoadResult
 {
     HundeAbiResultKind kind;
     uint32_t reserved;
-    HundeIOComponentV6 component;
+    HundeIOComponentV7 component;
     HundeAbiError error;
 } HundeIOComponentLoadResult;
 
-typedef HundeIOComponentLoadResult (*HundeIOComponentEntryV6)(ConstHundeIOHostOperationsV6Ptr host);
+typedef HundeIOComponentLoadResult (*HundeIOComponentEntryV7)(ConstHundeIOHostOperationsV6Ptr host);
 
 _Static_assert(sizeof(HundeIOHostOperationsV6) == 72, "I/O host ABI changed");
 _Static_assert(sizeof(HundeIORequestV6) == 104, "I/O request ABI changed");
@@ -121,7 +130,8 @@ _Static_assert(sizeof(HundeIOCompletion) == 1048, "I/O completion ABI changed");
 _Static_assert(sizeof(IOFileChange) == 24, "File change ABI changed");
 _Static_assert(offsetof(IOFileChange, generation) == 8, "File generation ABI changed");
 _Static_assert(offsetof(IOFileChange, events) == 16, "File events ABI changed");
-_Static_assert(sizeof(HundeIOComponentV6) == 40, "I/O component ABI changed");
-_Static_assert(sizeof(HundeIOComponentLoadResult) == 72, "I/O load result ABI changed");
+_Static_assert(sizeof(HundeIOSchedule) == 16, "I/O schedule ABI changed");
+_Static_assert(sizeof(HundeIOComponentV7) == 48, "I/O component ABI changed");
+_Static_assert(sizeof(HundeIOComponentLoadResult) == 80, "I/O load result ABI changed");
 
 #endif

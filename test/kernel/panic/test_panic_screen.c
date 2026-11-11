@@ -4,7 +4,7 @@
 #include "../../../kernel/panic.h"
 #include "../../../kernel/kernel_core.h"
 #include "../../../kernel/kernel_init.h"
-#include "../stubs/process_context_layout.h"
+#include "../stubs/thread_context_layout.h"
 
 void ArtworkTest__reset(void);
 const char * ArtworkTest__output(void);
@@ -97,7 +97,7 @@ void test_system_artwork_framebuffer_selects_distinct_images_and_clips_rows(void
 
 void test_kernel_panic_without_system_info_keeps_ascii_and_diagnostics(void)
 {
-    Kernel__panic("failure", &((ProcessContext){0}));
+    Kernel__panic("failure", &((ThreadContext){0}));
     TEST_ASSERT_EQUAL_STRING("panicKernel panik: failure\nSystem halted\n", ArtworkTest__output());
 }
 

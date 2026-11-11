@@ -1,4 +1,7 @@
-use super::{FileWatch, Handle, InheritanceToken, Operation, ProcessId, Reply, Request, SessionId};
+use super::{
+    FileWatch, Handle, InheritanceToken, Operation, ProcessGroupId, ProcessId, Reply, Request,
+    SessionId,
+};
 use crate::abi::IoError;
 use alloc::vec::Vec;
 
@@ -6,6 +9,8 @@ enum OwnedOperation {
     GetTerminalAttributes(crate::terminal::Attributes),
     SetTerminalAttributes(crate::terminal::Attributes),
     SetForegroundProcess(ProcessId),
+    GetForegroundGroup,
+    SetForegroundGroup(ProcessGroupId),
     Open(Vec<u8>, u64),
     Accept,
     Read(Vec<u8>),
@@ -46,6 +51,8 @@ impl OwnedRequest {
                 OwnedOperation::SetTerminalAttributes(attributes)
             }
             Operation::SetForegroundProcess(pid) => OwnedOperation::SetForegroundProcess(pid),
+            Operation::GetForegroundGroup => OwnedOperation::GetForegroundGroup,
+            Operation::SetForegroundGroup(group) => OwnedOperation::SetForegroundGroup(group),
             Operation::Open(path, flags) => OwnedOperation::Open(path.into(), flags),
             Operation::Accept => OwnedOperation::Accept,
             Operation::Read(buffer) => OwnedOperation::Read(alloc::vec![0; buffer.len()]),
@@ -93,6 +100,8 @@ impl OwnedRequest {
                 Operation::SetTerminalAttributes(*attributes)
             }
             OwnedOperation::SetForegroundProcess(pid) => Operation::SetForegroundProcess(*pid),
+            OwnedOperation::GetForegroundGroup => Operation::GetForegroundGroup,
+            OwnedOperation::SetForegroundGroup(group) => Operation::SetForegroundGroup(*group),
             OwnedOperation::Open(path, flags) => Operation::Open(path, *flags),
             OwnedOperation::Accept => Operation::Accept,
             OwnedOperation::Read(buffer) => Operation::Read(buffer),

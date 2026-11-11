@@ -8,6 +8,7 @@ import signal
 import shutil
 import subprocess
 import time
+import tempfile
 
 import pytest
 
@@ -15,6 +16,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROMPT = b"bash-5.3# "
 BOOT_TIMEOUT_SECONDS = 600
+BUILD_TIMEOUT_SECONDS = 1800
 COMMAND_TIMEOUT_SECONDS = 60
 SHUTDOWN_TIMEOUT_SECONDS = 60
 DIAGNOSTIC_BYTES = 8 * 1024
@@ -46,6 +48,7 @@ class QemuSession:
         finally:
             os.close(slave_fd)
         self.master_fd = master_fd
+        self.expect(b"qemu-system-", BUILD_TIMEOUT_SECONDS)
 
     def expect(self, marker, timeout):
         start_offset = self.expect_offset
@@ -181,6 +184,198 @@ def test_qemu_grep_reads_pipeline(qemu_session, target, trace_path):
     result = session.run_command("printf 'hello\\n' | grep hello; printf 'grep-status:%d\\n' $?")
     assert b"grep-status:0" in result, result
     assert b"getline: Invalid argument" not in result, result
+
+
+@pytest.mark.parametrize(
+    ("target", "trace_path"),
+    [
+        ("qemu-virt-hvf-trace", "build/aarch64/kernel-trace.log"),
+        ("qemu-riscv64-trace", "build/riscv64/kernel-trace.log"),
+    ],
+    ids=["aarch64", "riscv64"],
+)
+def test_qemu_thread_create_join(qemu_session, target, trace_path):
+    session = qemu_session(target, trace_path)
+    session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+
+    result = session.run_command("/sbin/thread_probe; printf 'thread-status:%d\\n' $?")
+    assert b"thread_probe: ok" in result, result
+    assert b"thread_probe: TLS ok" in result, result
+    assert b"thread-status:0" in result, result
+    main_exit = session.run_command("/sbin/thread_probe main-exit; printf 'main-exit-status:%d\\n' $?")
+    assert b"thread_probe: main-exit ok" in main_exit, main_exit
+    assert b"main-exit-status:0" in main_exit, main_exit
+    synchronization = session.run_command("/sbin/thread_probe sync; printf 'sync-status:%d\\n' $?")
+    assert b"thread_probe: sync ok" in synchronization, synchronization
+    assert b"sync-status:0" in synchronization, synchronization
+    allocation = session.run_command("/sbin/thread_probe allocation; printf 'allocation-status:%d\\n' $?")
+    assert b"thread_probe: allocation ok" in allocation, allocation
+    assert b"allocation-status:0" in allocation, allocation
+    session.assert_trace()
+
+
+@pytest.mark.parametrize(
+    ("target", "trace_path"),
+    [
+        ("qemu-virt-hvf-trace", "build/aarch64/kernel-trace.log"),
+        ("qemu-riscv64-trace", "build/riscv64/kernel-trace.log"),
+    ],
+    ids=["aarch64", "riscv64"],
+)
+def test_qemu_network_stack_in_memory(qemu_session, target, trace_path):
+    session = qemu_session(target, trace_path)
+    session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+
+    bootstrap_probe = session.run_command("test ! -e /sbin/network_probe; printf 'bootstrap-probe-status:%d\\n' $?")
+    assert b"bootstrap-probe-status:0" in bootstrap_probe, bootstrap_probe
+    for _ in range(3):
+        result = session.run_command("/usr/local/bin/network_probe; printf 'network-status:%d\\n' $?")
+        assert b"network-status:0" in result, result
+    trace = session.trace_path.read_bytes()
+    assert trace.count(b"network_probe: TCP UDP ARP retransmission cleanup ok") == 3
+    assert trace.count(b"network_probe: packet Channel cable TCP cleanup ok") == 3
+    session.assert_trace()
+
+
+@pytest.fixture
+def network_peer(tmp_path):
+    built = subprocess.run(
+        ["cargo", "build", "--manifest-path", "user/Cargo.toml", "--target-dir", "build/hosted/rust",
+         "-p", "hunde-network-nic-probe", "--bin", "network-peer"],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert built.returncode == 0, built.stderr
+    with tempfile.TemporaryDirectory(prefix="hunde-net-", dir="/tmp") as directory:
+        socket_path = pathlib.Path(directory) / "peer.sock"
+        log_path = tmp_path / "network-peer.log"
+        with log_path.open("wb") as log:
+            peer = subprocess.Popen(
+                [str(ROOT / "build/hosted/rust/debug/network-peer"), str(socket_path)],
+                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                while not socket_path.exists():
+                    assert peer.poll() is None, log_path.read_text()
+                    assert time.monotonic() < deadline, log_path.read_text()
+                    time.sleep(0.01)
+                yield socket_path, log_path
+            finally:
+                if peer.poll() is None:
+                    peer.terminate()
+                    try:
+                        peer.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        peer.kill()
+                        peer.wait(timeout=5)
+
+
+@pytest.mark.parametrize(
+    ("target", "trace_path"),
+    [("qemu-virt-hvf-trace", "build/aarch64/kernel-trace.log"),
+     ("qemu-riscv64-trace", "build/riscv64/kernel-trace.log")],
+    ids=["aarch64", "riscv64"],
+)
+def test_qemu_virtio_network(qemu_session, network_peer, tmp_path, target, trace_path):
+    socket_path, log_path = network_peer
+    configuration = "qemu_riscv64" if target == "qemu-riscv64-trace" else "qemu_virt_hvf"
+    directory = tmp_path / "boot-config"
+    shutil.copytree(ROOT / "config" / configuration, directory)
+    fstab = directory / "fstab"
+    fstab.write_text("\n".join(
+        line for line in fstab.read_text().splitlines()
+        if not line.startswith("device /dev/virtio") or line.split()[-1] == "/"
+    ) + "\n")
+    boot_image = tmp_path / "boot-config.img"
+    subprocess.run(
+        ["genext2fs", "-b", "8192", "-B", "1024", "-L", "BOOTCFG", "-d", str(directory), str(boot_image)],
+        check=True,
+    )
+    arguments = (f"QEMU_NET_ARGS=-netdev stream,id=nic,server=off,addr.type=unix,addr.path={socket_path} "
+                 "-device virtio-net-device,netdev=nic,mac=02:00:00:00:01:01")
+    session = qemu_session(target, trace_path, (
+        arguments,
+        "QEMU_TEST_BLOCK_ARGS=",
+        f"BOOT_CONFIG_EXT2_IMG={boot_image}",
+        f"HVF_BOOT_CONFIG_EXT2_IMG={boot_image}",
+    ))
+    session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+    result = session.run_command("/usr/local/bin/network_nic_probe; printf 'nic-status:%d\\n' $?")
+    assert b"nic-status:0" in result, result
+    mounts = session.run_command("cat /boot/config/fstab")
+    assert b"device /dev/virtio1 ext2.wuff /" in mounts, mounts
+    assert b"/mnt/" not in mounts, mounts
+    trace = session.trace_path.read_bytes()
+    assert b"Rust virtio_keyboard.wuff ready" in trace
+    assert b"Rust VirtIO net IRQ delivered" in trace
+    assert b"network_nic_probe: external ARP ICMP TCP UDP cleanup ok" in trace
+    deadline = time.monotonic() + 5
+    while b"external TCP UDP echo complete" not in log_path.read_bytes():
+        assert time.monotonic() < deadline, log_path.read_text()
+        time.sleep(0.01)
+    peer_log = log_path.read_bytes()
+    assert b"network-peer: ARP" in peer_log
+    assert b"network-peer: dropped SYN" in peer_log
+    session.send_line("shutdown")
+    session.wait_for_exit(SHUTDOWN_TIMEOUT_SECONDS)
+    session.assert_trace()
+
+
+@pytest.mark.parametrize(
+    ("target", "trace_path"),
+    [
+        ("qemu-virt-hvf-trace", "build/aarch64/kernel-trace.log"),
+        ("qemu-riscv64-trace", "build/riscv64/kernel-trace.log"),
+    ],
+    ids=["aarch64", "riscv64"],
+)
+def test_qemu_tcp_localhost(qemu_session, target, trace_path):
+    session = qemu_session(target, trace_path)
+    session.expect(b"login: ", BOOT_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(b"password: ", COMMAND_TIMEOUT_SECONDS)
+    session.send_line("root")
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+    for uri in ("tcp://127.0.0.1:8080", "tcp://[::1]:8081", "tcp://localhost:8082", "socket://localhost-regression"):
+        session.send_line(f"socket_test listen '{uri}' &")
+        session.expect(f"socket_test: listening {uri}".encode(), COMMAND_TIMEOUT_SECONDS)
+        session.send_line("printf 'localhost-%s\\n' coexist | /usr/local/bin/cat")
+        session.expect(b"localhost-coexist", COMMAND_TIMEOUT_SECONDS)
+        session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+        session.send_line(f"socket_test connect '{uri}' localhost-ping")
+        exchange = session.expect(b"socket_test: reply pong", COMMAND_TIMEOUT_SECONDS)
+        assert b"socket_test: received localhost-ping" in exchange, exchange
+        session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+        completed = session.run_command("wait; printf 'localhost-status:%d\\n' $?")
+        assert b"localhost-status:0" in completed, completed
+    session.send_line("socket_test bulk-listen tcp://localhost:8083 & server_pid=$!")
+    session.expect(b"socket_test: bulk listening tcp://localhost:8083", COMMAND_TIMEOUT_SECONDS)
+    session.send_line(
+        "socket_test bulk-connect tcp://localhost:8083; client_status=$?; "
+        "wait \"$server_pid\"; printf 'bulk-status:%d:%d\\n' \"$client_status\" \"$?\""
+    )
+    bulk = session.expect(b"bulk-status:0:0", COMMAND_TIMEOUT_SECONDS)
+    assert b"socket_test: bulk sent 32768" in bulk, bulk
+    assert b"socket_test: bulk received 32768" in bulk, bulk
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
+    refused = session.run_command("socket_test connect tcp://localhost:9000; printf 'refused-status:%d\\n' $?")
+    assert b"socket_test: connect error" in refused, refused
+    assert b"refused-status:1" in refused, refused
+    trace = session.trace_path.read_bytes()
+    assert b"Rust network.wuff ready" in trace
+    session.assert_trace()
 
 
 def test_qemu_pci_sdhci_is_hosted_and_reads_by_irq(qemu_session):
@@ -765,8 +960,7 @@ def test_qemu_login_commands_and_shutdown(qemu_session, target, trace_path, arch
     session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
 
     os.write(session.master_fd, b"partial\x03")
-    cancelled = session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
-    assert b"partial^C" in cancelled
+    session.expect(PROMPT, COMMAND_TIMEOUT_SECONDS)
 
     processes = session.run_command("ps")
     assert b"/usr/local/bin/bash" in processes

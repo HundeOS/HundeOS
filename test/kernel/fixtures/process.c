@@ -41,9 +41,9 @@ ProcessPtr dummy_process(Tick last_tick, CPUID cpu, ProcessState state)
         Process__setup(ProcessFixture__kernel(), &hello_world, &None(ProcessPtr)),
         success(process)
         {
-            process->last_tick = last_tick;
+            process->thread.last_tick = last_tick;
             process->pid = last_tick * MAX_CPUS + cpu;
-            process->state = state;
+            process->thread.state = state;
 
             return process;
         },
@@ -59,9 +59,9 @@ ProcessPtr dummy_process_with_parent(Tick last_tick, CPUID cpu, ProcessState sta
         Process__setup(ProcessFixture__kernel(), &hello_world, &Some(ProcessPtr, parent)),
         success(process)
         {
-            process->last_tick = last_tick;
+            process->thread.last_tick = last_tick;
             process->pid = last_tick * MAX_CPUS + cpu;
-            process->state = state;
+            process->thread.state = state;
 
             return process;
         },

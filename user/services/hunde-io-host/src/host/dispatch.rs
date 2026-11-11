@@ -695,6 +695,9 @@ impl<Driver> Clone for Hosted<Driver> {
     }
 }
 impl<Driver: IoComponent> IoComponent for Hosted<Driver> {
+    fn advance(&mut self, now_usec: u64) -> hunde::component::Schedule {
+        self.0.borrow_mut().advance(now_usec)
+    }
     fn execute(&mut self, request: Request<'_>) -> Result<Option<Reply>, IoError> {
         self.0
             .try_borrow_mut()
@@ -759,6 +762,9 @@ impl<Driver: IoComponent> Worker<Driver> {
     }
     pub(crate) fn driver(&self) -> Hosted<Driver> {
         self.driver.clone()
+    }
+    pub(crate) fn advance(&mut self, now_usec: u64) -> hunde::component::Schedule {
+        self.driver.advance(now_usec)
     }
     pub(crate) fn poll(&mut self) -> bool {
         let mut progress = false;

@@ -4,7 +4,8 @@
 #include "syscall_dispatcher.h"
 #include "syscalls/mem.h"
 
-Result(SystemCallResult) Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything mem_operation,
-                                      Anything arg2, Anything arg3, Anything arg4, Anything arg5);
+Result(SystemCallResult)
+    Mem__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything mem_operation, Anything arg2, Anything arg3,
+                 Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread);
 
 #endif

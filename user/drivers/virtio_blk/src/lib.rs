@@ -10,7 +10,7 @@ use core::cell::RefCell;
 use device::Device;
 use hunde::abi::IoError;
 use hunde::block_driver::{Buffer, Server, Transfer, Wait};
-use hunde::boot::{BlockDriverConfiguration, VirtioMmio};
+use hunde::boot::{VirtioEndpointConfiguration, VirtioMmio};
 use hunde::protocol::SERVICE_INVALID_BUFFER;
 use hunde::wuff::{DriverComponent, DriverProgress};
 use queue::Direction;
@@ -169,7 +169,7 @@ pub struct BlockDriver {
 
 impl DriverComponent for BlockDriver {
     fn load(configuration: &[u8]) -> Result<Self, IoError> {
-        let configuration = BlockDriverConfiguration::from_wire_bytes(configuration)?;
+        let configuration = VirtioEndpointConfiguration::from_wire_bytes(configuration)?;
         let device = Rc::new(RefCell::new(Device::start(
             configuration.hardware,
             configuration.slot,
@@ -223,29 +223,5 @@ impl DriverComponent for BlockDriver {
 }
 
 pub fn probe_slots(hardware: VirtioMmio) -> Result<u64, IoError> {
-    let length = hardware
-        .slot_size
-        .checked_mul(hardware.slot_count)
-        .and_then(|length| usize::try_from(length).ok())
-        .ok_or(IoError(SERVICE_INVALID_BUFFER))?;
-    if hardware.slot_count > 64
-        || hardware.slot_size < 0x108
-        || !hardware.slot_size.is_multiple_of(4)
-    {
-        return Err(IoError(SERVICE_INVALID_BUFFER));
-    }
-    let registers = hunde::mmio::Mapping::map(hardware.physical_base, length)?;
-    let mut slots = 0;
-    for slot in 0..hardware.slot_count {
-        let offset = usize::try_from(slot * hardware.slot_size)
-            .map_err(|_| IoError(SERVICE_INVALID_BUFFER))?;
-        if Device::is_block(
-            registers.read_u32(offset)?,
-            registers.read_u32(offset + 4)?,
-            registers.read_u32(offset + 8)?,
-        ) {
-            slots |= 1_u64 << slot;
-        }
-    }
-    Ok(slots)
+    hunde::virtio::probe_slots(hardware, 2)
 }

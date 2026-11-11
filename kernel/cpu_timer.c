@@ -28,7 +28,7 @@ Result(IRQDispatchStatus) CPUTimer__handle_irq(IRQDispatchContextPtr context, Ke
 
     if (Scheduler__should_preempt_on_timer(kernel->scheduler, context->cpu))
     {
-        Scheduler__preempt(kernel->scheduler, context->cpu, &Some(ProcessContextPtr, context->process_context));
+        Scheduler__preempt(kernel->scheduler, context->cpu, &Some(ThreadContextPtr, context->thread_context));
     }
     return Success(IRQDispatchStatus, IRQ_DISPATCH_HANDLED);
 }

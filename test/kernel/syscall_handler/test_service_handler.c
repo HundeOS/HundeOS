@@ -14,6 +14,7 @@
 #include "../fixtures/process.h"
 #include "../stubs/panic.h"
 #include "../stubs/process.h"
+#include "../stubs/thread_context_layout.h"
 
 #define Service__handler(kernel, process, ...) Service__handler((kernel), &(process), __VA_ARGS__)
 
@@ -30,13 +31,13 @@ typedef struct TestServiceMappedMemoryRequest
 
 static void test_resume_process(ProcessPtr process)
 {
-    ContextSwitch context_switch = ContextSwitch__new(process, &None(ProcessPtr));
+    ContextSwitch context_switch = ContextSwitch__new(&process->thread, &None(ThreadPtr));
     ContextSwitch__switch(&context_switch);
 }
 
 static KernelContext test_kernel_context_for_process(ProcessPtr process)
 {
-    return KernelContext__new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, kernel->scheduler));
+    return KernelContext__new(&Some(ThreadPtr, &process->thread), &Some(SchedulerPtr, kernel->scheduler));
 }
 
 static ServiceReadyRequest test_ready_request(const char * name)
@@ -54,7 +55,6 @@ uint64_t Arch__enable_count();
 void setUp(void)
 {
     clear_panic_state();
-    clear_deferred_syscall_result();
     current_process_reset();
     Arch__reset_irq_tracking();
     kernel = init_test_kernel();
@@ -68,7 +68,7 @@ void tearDown(void)
 void test_service_handler_wait_copies_queued_event(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
 
     ServiceEvent queued = (ServiceEvent){
         .type = SERVICE_EVENT_IRQ,
@@ -87,7 +87,7 @@ void test_service_handler_wait_copies_queued_event(void)
     );
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -102,10 +102,10 @@ void test_service_handler_wait_copies_queued_event(void)
 void test_service_handler_become_service_marks_process_as_service(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_NORMAL;
+    process->scheduling.process_class = PROCESS_CLASS_NORMAL;
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_BECOME_SERVICE, 0, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_BECOME_SERVICE, 0, 0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -113,7 +113,7 @@ void test_service_handler_become_service_marks_process_as_service(void)
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL(PROCESS_CLASS_SERVICE, process->process_class);
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_SERVICE, process->scheduling.process_class);
 }
 
 void test_service_handler_rejects_retired_filesystem_and_socket_brokers(void)
@@ -126,7 +126,7 @@ void test_service_handler_rejects_retired_filesystem_and_socket_brokers(void)
             continue;
         }
         match_result(
-            Service__handler(kernel, Some(ProcessPtr, process), operation, 0, 0, 0, 0),
+            Service__handler(kernel, Some(ProcessPtr, process), operation, 0, 0, 0, 0, &None(ThreadPtr)),
             success_test_fail(),
             error(code, message)
             {
@@ -139,11 +139,11 @@ void test_service_handler_rejects_retired_filesystem_and_socket_brokers(void)
 void test_service_handler_become_service_denies_unprivileged_process(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_NORMAL;
+    process->scheduling.process_class = PROCESS_CLASS_NORMAL;
     Process__set_identity(process, 1000, 1000, PROCESS_CAP_NONE);
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_BECOME_SERVICE, 0, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_BECOME_SERVICE, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -151,7 +151,7 @@ void test_service_handler_become_service_denies_unprivileged_process(void)
         }
     );
 
-    TEST_ASSERT_EQUAL(PROCESS_CLASS_NORMAL, process->process_class);
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_NORMAL, process->scheduling.process_class);
 }
 
 void test_service_handler_authorizes_only_live_capable_block_clients(void)
@@ -162,7 +162,8 @@ void test_service_handler_authorizes_only_live_capable_block_clients(void)
     Process__set_hund_identity(client);
     Scheduler__schedule_on_cpu(kernel->scheduler, client, cpu);
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0,
+                         &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -171,7 +172,8 @@ void test_service_handler_authorizes_only_live_capable_block_clients(void)
     );
     Process__set_identity(client, 1000, 1000, PROCESS_CAP_NONE);
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -179,7 +181,8 @@ void test_service_handler_authorizes_only_live_capable_block_clients(void)
         }
     );
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, 99999, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, 99999, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -188,7 +191,8 @@ void test_service_handler_authorizes_only_live_capable_block_clients(void)
     );
     Process__set_identity(service, 1000, 1000, PROCESS_CAP_NONE);
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_BLOCK_CLIENT, client->pid, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -197,10 +201,11 @@ void test_service_handler_authorizes_only_live_capable_block_clients(void)
     );
 
     Process__set_hund_identity(service);
-    service->process_class = PROCESS_CLASS_SERVICE;
+    service->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(client);
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_MOUNT_CLIENT, client->pid, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_MOUNT_CLIENT, client->pid, 0, 0, 0,
+                         &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -209,7 +214,8 @@ void test_service_handler_authorizes_only_live_capable_block_clients(void)
     );
     Process__set_identity(client, 1000, 1000, PROCESS_CAP_NONE);
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_MOUNT_CLIENT, client->pid, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_MOUNT_CLIENT, client->pid, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -217,16 +223,18 @@ void test_service_handler_authorizes_only_live_capable_block_clients(void)
         }
     );
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_MOUNT_CLIENT, 99999, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_MOUNT_CLIENT, 99999, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
             TEST_ASSERT_EQUAL(SERVICE_PERMISSION_DENIED, code);
         }
     );
-    service->process_class = PROCESS_CLASS_NORMAL;
+    service->scheduling.process_class = PROCESS_CLASS_NORMAL;
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_MOUNT_CLIENT, client->pid, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_AUTHORIZE_MOUNT_CLIENT, client->pid, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -247,7 +255,8 @@ void test_service_handler_map_mmio_denies_unprivileged_process(void)
     };
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_MAP_MMIO, (Anything)&request, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_MAP_MMIO, (Anything)&request, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -259,7 +268,7 @@ void test_service_handler_map_mmio_denies_unprivileged_process(void)
 void test_service_handler_translates_service_user_address_to_device_address(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
 
     Result(UserAddress) allocation_result = Process__alloc_user_pages(process, 512);
     TEST_ASSERT_TRUE(allocation_result.ok);
@@ -267,7 +276,8 @@ void test_service_handler_translates_service_user_address_to_device_address(void
     ServiceDeviceAddressRequest request = ServiceDeviceAddressRequest__new(allocation.virtual_addr + 128);
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_DEVICE_ADDRESS, (Anything)&request, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_DEVICE_ADDRESS, (Anything)&request, 0, 0, 0,
+                         &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -280,13 +290,13 @@ void test_service_handler_translates_service_user_address_to_device_address(void
 void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ServiceEvent target = (ServiceEvent){0};
 
     Scheduler__schedule_on_cpu(kernel->scheduler, process, cpu);
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -294,7 +304,7 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
         }
     );
 
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, process->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, process->thread.state);
 
     ServiceEvent queued = (ServiceEvent){
         .type = SERVICE_EVENT_MESSAGE,
@@ -311,26 +321,27 @@ void test_service_handler_wait_parks_and_completes_when_event_arrives(void)
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, process->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, process->thread.state);
 
     test_resume_process(process);
 
-    TEST_ASSERT_EQUAL(SERVICE_OK, unwrap_result(deferred_syscall_result(), (Anything)-999));
+    TEST_ASSERT_EQUAL(SERVICE_OK, Thread__required_context(&process->thread)->x[0]);
 
     TEST_ASSERT_EQUAL(SERVICE_EVENT_MESSAGE, target.type);
     TEST_ASSERT_EQUAL(7, target.source);
     TEST_ASSERT_EQUAL(11, target.data);
-    TEST_ASSERT_EQUAL(0, ServiceEvents__len(&process->service.events));
+    TEST_ASSERT_EQUAL(0, ServiceEvents__len(&process->service_state.service.events));
 }
 
 void test_service_handler_wait_ready_returns_immediately_when_name_was_published(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ServiceReadyRequest request = test_ready_request("/dev/mmc0");
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_PUBLISH_READY, (Anything)&request, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_PUBLISH_READY, (Anything)&request, 0, 0, 0,
+                         &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -339,7 +350,8 @@ void test_service_handler_wait_ready_returns_immediately_when_name_was_published
     );
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT_READY, (Anything)&request, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT_READY, (Anything)&request, 0, 0, 0,
+                         &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -351,15 +363,16 @@ void test_service_handler_wait_ready_returns_immediately_when_name_was_published
 void test_service_handler_publish_ready_unparks_waiter(void)
 {
     ProcessPtr waiter = dummy_process(1, cpu, PROC_STATE_READY);
-    waiter->process_class = PROCESS_CLASS_SERVICE;
+    waiter->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ProcessPtr publisher = dummy_process(2, cpu, PROC_STATE_READY);
-    publisher->process_class = PROCESS_CLASS_SERVICE;
+    publisher->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ServiceReadyRequest request = test_ready_request("/dev/mmc0");
 
     Scheduler__schedule_on_cpu(kernel->scheduler, waiter, cpu);
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, waiter), SERVICE_WAIT_READY, (Anything)&request, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, waiter), SERVICE_WAIT_READY, (Anything)&request, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -367,10 +380,11 @@ void test_service_handler_publish_ready_unparks_waiter(void)
         }
     );
 
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, waiter->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, waiter->thread.state);
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, publisher), SERVICE_PUBLISH_READY, (Anything)&request, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, publisher), SERVICE_PUBLISH_READY, (Anything)&request, 0, 0, 0,
+                         &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -378,21 +392,22 @@ void test_service_handler_publish_ready_unparks_waiter(void)
         error_test_fail()
     );
 
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, waiter->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, waiter->thread.state);
 
     test_resume_process(waiter);
 
-    TEST_ASSERT_EQUAL(SERVICE_OK, unwrap_result(deferred_syscall_result(), (Anything)-999));
+    TEST_ASSERT_EQUAL(SERVICE_OK, Thread__required_context(&waiter->thread)->x[0]);
 }
 
 void test_service_handler_publish_ready_does_not_register_endpoint(void)
 {
     ProcessPtr service = dummy_process(1, cpu, PROC_STATE_READY);
-    service->process_class = PROCESS_CLASS_SERVICE;
+    service->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ServiceReadyRequest ready = test_ready_request("hundekanal-warter");
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_PUBLISH_READY, (Anything)&ready, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, service), SERVICE_PUBLISH_READY, (Anything)&ready, 0, 0, 0,
+                         &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -407,7 +422,7 @@ void test_service_handler_publish_ready_does_not_register_endpoint(void)
 void test_service_handler_wait_completes_previous_irq_before_next_wait(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     IRQNumber irq = 33;
     ServiceEvent target = (ServiceEvent){0};
 
@@ -434,7 +449,7 @@ void test_service_handler_wait_completes_previous_irq_before_next_wait(void)
     TEST_ASSERT_EQUAL(1, Arch__mask_count());
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -448,7 +463,7 @@ void test_service_handler_wait_completes_previous_irq_before_next_wait(void)
     TEST_ASSERT_EQUAL(0, Arch__unmask_count());
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&target, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -463,11 +478,11 @@ void test_service_handler_wait_completes_previous_irq_before_next_wait(void)
 void test_service_handler_subscribe_irq_registers_service_consumer(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     IRQNumber irq = 48;
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -482,7 +497,7 @@ void test_service_handler_subscribe_irq_registers_service_consumer(void)
         .irq = irq,
         .cpu = cpu,
         .current_el = false,
-        .process_context = NULL,
+        .thread_context = NULL,
     };
 
     match_result(
@@ -496,7 +511,7 @@ void test_service_handler_subscribe_irq_registers_service_consumer(void)
 
     ServiceEvent event = (ServiceEvent){0};
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&event, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_WAIT, (Anything)&event, 0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -511,13 +526,14 @@ void test_service_handler_subscribe_irq_registers_service_consumer(void)
 void test_service_handler_subscribe_irq_maps_duplicate_registration_to_service_code(void)
 {
     ProcessPtr first_process = dummy_process(1, cpu, PROC_STATE_READY);
-    first_process->process_class = PROCESS_CLASS_SERVICE;
+    first_process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ProcessPtr second_process = dummy_process(2, cpu, PROC_STATE_READY);
-    second_process->process_class = PROCESS_CLASS_SERVICE;
+    second_process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     IRQNumber irq = 48;
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, first_process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, first_process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0,
+                         &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -526,7 +542,8 @@ void test_service_handler_subscribe_irq_maps_duplicate_registration_to_service_c
     );
 
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, second_process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, second_process), SERVICE_SUBSCRIBE_IRQ, irq, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -541,7 +558,7 @@ void test_service_handler_registers_interrupt_manager_with_plic_mapping(void)
 {
     const Address plic_physical_base = 0x0c000000;
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(process);
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, process, cpu),
         success_do_nothing(),
@@ -557,7 +574,7 @@ void test_service_handler_registers_interrupt_manager_with_plic_mapping(void)
     ServiceInterruptManagerRegistration registration = {0};
     match_result(
         Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_INTERRUPT_MANAGER, (Anything)&registration,
-                         0, 0, 0),
+                         0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -569,7 +586,7 @@ void test_service_handler_registers_interrupt_manager_with_plic_mapping(void)
     TEST_ASSERT_NOT_EQUAL(0, registration.distributor);
     TEST_ASSERT_GREATER_OR_EQUAL_UINT64(USER_ALLOC_BASE, registration.distributor);
     TEST_ASSERT_LESS_THAN_UINT64(HUND_SERVICE_DIRECTORY_VADDR, registration.distributor);
-    TEST_ASSERT_EQUAL(PROCESS_CLASS_REALTIME_SERVICE, process->process_class);
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_REALTIME_SERVICE, process->scheduling.process_class);
     match_result(
         Process__device_address(process, registration.distributor),
         success(device_address)
@@ -583,7 +600,7 @@ void test_service_handler_registers_interrupt_manager_with_plic_mapping(void)
 void test_service_handler_maps_only_plic_priorities_independently_of_target_hart(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(process);
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, process, cpu),
         success_do_nothing(),
@@ -598,7 +615,7 @@ void test_service_handler_maps_only_plic_priorities_independently_of_target_hart
     ServiceInterruptManagerRegistration registration = {0};
     match_result(
         Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_INTERRUPT_MANAGER, (Anything)&registration,
-                         0, 0, 0),
+                         0, 0, 0, &None(ThreadPtr)),
         success(code)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, code);
@@ -608,7 +625,7 @@ void test_service_handler_maps_only_plic_priorities_independently_of_target_hart
 
     TEST_ASSERT_NOT_EQUAL(0, registration.event_queue);
     TEST_ASSERT_NOT_EQUAL(0, registration.distributor);
-    TEST_ASSERT_EQUAL(PROCESS_CLASS_REALTIME_SERVICE, process->process_class);
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_REALTIME_SERVICE, process->scheduling.process_class);
     match_result(
         Process__device_address(process, registration.distributor + 0xffc),
         success(device_address)
@@ -626,14 +643,14 @@ void test_service_handler_maps_only_plic_priorities_independently_of_target_hart
 void test_service_handler_does_not_promote_failed_interrupt_manager_registration(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(process);
     kernel->system_info = None(SystemInfo);
 
     ServiceInterruptManagerRegistration registration = {0};
     match_result(
         Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_INTERRUPT_MANAGER, (Anything)&registration,
-                         0, 0, 0),
+                         0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -641,17 +658,17 @@ void test_service_handler_does_not_promote_failed_interrupt_manager_registration
         }
     );
 
-    TEST_ASSERT_EQUAL(PROCESS_CLASS_SERVICE, process->process_class);
+    TEST_ASSERT_EQUAL(PROCESS_CLASS_SERVICE, process->scheduling.process_class);
 }
 
 void test_service_handler_publishes_block_metadata_without_io_transport(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     ServiceBlockDeviceRegistration request = ServiceBlockDeviceRegistration__new(&bstr("/dev/test"), 512, 128);
-    match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything)&request, 0, 0, 0),
-        success_do_nothing(),
+    match_result(Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything)&request,
+                                  0, 0, 0, &None(ThreadPtr)),
+                 success_do_nothing(),
         error_test_fail()
     );
     DeviceRegistryPtr directory = k_v_ptr(kernel->device_registry.mapping, DeviceRegistry);
@@ -667,7 +684,8 @@ void test_service_handler_publishes_block_metadata_without_io_transport(void)
         error_test_fail()
     );
     match_result(
-        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything)&request, 0, 0, 0),
+        Service__handler(kernel, Some(ProcessPtr, process), SERVICE_REGISTER_BLOCK_DEVICE, (Anything)&request, 0, 0, 0,
+                         &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -688,7 +706,7 @@ void test_service_handler_publishes_block_metadata_without_io_transport(void)
 void test_service_handler_rejects_retired_block_transport_operations(void)
 {
     ProcessPtr process = dummy_process(1, cpu, PROC_STATE_READY);
-    process->process_class = PROCESS_CLASS_SERVICE;
+    process->scheduling.process_class = PROCESS_CLASS_SERVICE;
     for (uint64_t operation = 0; operation < 8; operation++)
     {
         const ServiceOperation retired[] = {SERVICE_BLOCK_GET_REQUEST,       SERVICE_BLOCK_COMPLETE,
@@ -696,7 +714,7 @@ void test_service_handler_rejects_retired_block_transport_operations(void)
                                             SERVICE_BLOCK_READ_DEVICE_ASYNC, SERVICE_BLOCK_WRITE_DEVICE_ASYNC,
                                             SERVICE_BLOCK_CONNECT,           SERVICE_BLOCK_DISCONNECT};
         match_result(
-            Service__handler(kernel, Some(ProcessPtr, process), retired[operation], 0, 0, 0, 0),
+            Service__handler(kernel, Some(ProcessPtr, process), retired[operation], 0, 0, 0, 0, &None(ThreadPtr)),
             success_test_fail(),
             error(code, message)
             {

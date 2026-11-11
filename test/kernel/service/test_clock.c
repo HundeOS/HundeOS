@@ -22,8 +22,8 @@ void tearDown(void)
 
 void test_clock_maps_read_only_and_non_executable(void)
 {
-    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), CLOCK_PAGE_VADDR, true,
-                                          false, false, CLOCK_PAGE_SIZE));
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                          CLOCK_PAGE_VADDR, true, false, false, CLOCK_PAGE_SIZE));
     TEST_ASSERT_TRUE(kernel->clock.mapping.read);
     TEST_ASSERT_FALSE(kernel->clock.mapping.write);
     TEST_ASSERT_FALSE(kernel->clock.mapping.execute);

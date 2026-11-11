@@ -1,6 +1,29 @@
 use crate::abi::{Header, IoError, StatusResult};
 use core::ffi::c_void;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Schedule {
+    worked: bool,
+    deadline_usec: Option<u64>,
+}
+
+impl Schedule {
+    pub fn new(worked: bool, deadline_usec: Option<u64>) -> Self {
+        Self {
+            worked,
+            deadline_usec,
+        }
+    }
+
+    pub fn worked(self) -> bool {
+        self.worked
+    }
+
+    pub fn deadline_usec(self) -> Option<u64> {
+        self.deadline_usec
+    }
+}
+
 #[cfg(feature = "alloc")]
 mod io {
     use crate::abi::{
@@ -13,6 +36,9 @@ mod io {
     use core::ffi::c_void;
 
     pub trait IoComponent: 'static {
+        fn advance(&mut self, _now_usec: u64) -> super::Schedule {
+            super::Schedule::default()
+        }
         fn execute(&mut self, request: Request<'_>) -> Result<Option<crate::io::Reply>, IoError>;
         fn disconnect(&mut self, session: SessionId) -> Result<(), IoError>;
         fn reclaim_cache(&mut self) -> Result<(), IoError> {
@@ -30,6 +56,9 @@ mod io {
     }
 
     impl<Driver: IoComponent + ?Sized> IoComponent for Box<Driver> {
+        fn advance(&mut self, now_usec: u64) -> super::Schedule {
+            (**self).advance(now_usec)
+        }
         fn execute(&mut self, request: Request<'_>) -> Result<Option<crate::io::Reply>, IoError> {
             (**self).execute(request)
         }
@@ -149,7 +178,16 @@ mod io {
             execute: Some(execute::<Driver>),
             disconnect: Some(disconnect::<Driver>),
             dispose: Some(dispose::<Driver>),
+            advance: Some(advance::<Driver>),
         })
+    }
+
+    pub(crate) unsafe extern "C" fn advance<Driver: IoComponent>(
+        context: *mut c_void,
+        now_usec: u64,
+    ) -> crate::abi::RawSchedule {
+        let driver = unsafe { &mut *context.cast::<Driver>() };
+        driver.advance(now_usec).into()
     }
 
     #[macro_export]
@@ -162,7 +200,7 @@ mod io {
             /// # Safety
             /// The host and callbacks must satisfy `component::load_with`'s contracts.
             #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn hunde_io_component_entry_v6(
+            pub unsafe extern "C" fn hunde_io_component_entry_v7(
                 host: *const $crate::abi::HostOperations,
             ) -> $crate::abi::LoadResult {
                 unsafe { $crate::component::load_with::<$driver>(host, $initialize) }
@@ -177,7 +215,7 @@ mod io {
             /// The host and returned callbacks must satisfy `component::load`'s
             /// host-table, request-buffer, serialization, and disposal contracts.
             #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn hunde_io_component_entry_v6(
+            pub unsafe extern "C" fn hunde_io_component_entry_v7(
                 host: *const $crate::abi::HostOperations,
             ) -> $crate::abi::LoadResult {
                 unsafe { $crate::component::load::<$driver>(host) }

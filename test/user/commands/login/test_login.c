@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "unity.h"
 
@@ -22,6 +23,26 @@ static uint64_t output_position;
 static BString console_inputs[8];
 static uint64_t console_input_count;
 static uint64_t console_input_index;
+static pid_t next_session_id;
+static pid_t terminal_group;
+static bool terminal_claim_fails;
+
+pid_t setsid(void)
+{
+    return next_session_id;
+}
+
+pid_t getpgrp(void)
+{
+    return next_session_id;
+}
+
+int tcsetpgrp(int descriptor, pid_t process_group_id)
+{
+    TEST_ASSERT_EQUAL_INT(STDIN_FILENO, descriptor);
+    terminal_group = process_group_id;
+    return terminal_claim_fails ? -1 : 0;
+}
 
 #define main login_main_under_test
 #include "../../../../user/commands/login/main.c"
@@ -39,6 +60,9 @@ void setUp(void)
     output[0] = '\0';
     console_input_count = 0;
     console_input_index = 0;
+    next_session_id = 14;
+    terminal_group = 0;
+    terminal_claim_fails = false;
 }
 
 void tearDown(void)
@@ -173,7 +197,23 @@ void test_login_authenticates_user_and_spawns_shell_as_user(void)
     TEST_ASSERT_EQUAL(P_WAIT, last_mode);
     TEST_ASSERT_EQUAL_UINT64(42, last_auth_ticket_id);
     TEST_ASSERT_EQUAL_STRING("/usr/local/bin/bash", last_path);
+    TEST_ASSERT_EQUAL_INT64(14, terminal_group);
     TEST_ASSERT_TRUE(contains_text(output, "login: failed to start bash: -1\n"));
+}
+
+void test_login_reports_terminal_session_setup_failure(void)
+{
+    next_session_id = -1;
+    TEST_ASSERT_EQUAL_INT(1, login_main_under_test());
+    TEST_ASSERT_TRUE(contains_text(output, "login: cannot establish terminal session\n"));
+
+    next_session_id = 14;
+    terminal_claim_fails = true;
+    output_position = 0;
+    output[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(1, login_main_under_test());
+    TEST_ASSERT_EQUAL_INT64(14, terminal_group);
+    TEST_ASSERT_TRUE(contains_text(output, "login: cannot establish terminal session\n"));
 }
 
 void test_login_retries_after_invalid_credentials(void)

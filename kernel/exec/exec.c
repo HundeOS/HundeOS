@@ -19,6 +19,7 @@ static const BString hundeschau_boot_program = bstr("services/hundeschau");
 static const BString hundekanal_warter_program = bstr("/sbin/services/hundekanal-warter");
 static const BString hunde_bus_program = bstr("/sbin/drivers/hunde-bus");
 static const BString block_partition_program = bstr("/sbin/drivers/block_partition");
+static const BString io_host_program = bstr("/sbin/services/hunde-io-host");
 
 static bool Exec__is_hund_owned_program(ConstBStringPtr path)
 {
@@ -34,6 +35,10 @@ void Exec__apply_builtin_identity_policy(ProcessPtr self)
     if (Exec__is_hund_owned_program(&self->name))
     {
         Process__set_hund_identity(self);
+    }
+    if (BString__equals(&self->name, &io_host_program) && self->user_id == PROCESS_USER_HUND)
+    {
+        self->capabilities |= PROCESS_CAP_SIGNAL_TERMINAL;
     }
 }
 
@@ -122,7 +127,7 @@ static Result(ProcessPtr)
             ProcessPtr new_proc = process;
             Exec__apply_requested_identity(new_proc, requested_user_id);
             Exec__apply_builtin_identity_policy(new_proc);
-            new_proc->startup_stdio = *startup;
+            new_proc->image.startup_stdio = *startup;
             match_optional(
                 context->process,
                 some(parent)

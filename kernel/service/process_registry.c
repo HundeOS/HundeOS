@@ -12,7 +12,7 @@ Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr 
     critical_section(
         self->lock,
         {
-            if (process->process_registry_mapped)
+            if (process->address_space.process_registry_mapped)
             {
                 cs_return(Success(ServiceCode, SERVICE_OK));
             }
@@ -34,15 +34,15 @@ Result(ServiceCode) KernelProcessRegistry__map_process(KernelProcessRegistryPtr 
                 );
             }
             match_result(
-                PageTable__try_map_shared_blocks(&process->page_table, process->kernel, self->mapping,
-                                                 PROCESS_REGISTRY_SIZE),
+                PageTable__try_map_shared_blocks(&process->address_space.page_table, process->kernel,
+                                                 self->mapping, PROCESS_REGISTRY_SIZE),
                 success_do_nothing(),
                 error(code, message)
                 {
                     cs_return(Error(ServiceCode, message, SERVICE_MAP_FAILED));
                 }
             );
-            process->process_registry_mapped = true;
+            process->address_space.process_registry_mapped = true;
             cs_return(Success(ServiceCode, SERVICE_OK));
         }
     );
@@ -72,7 +72,7 @@ ProcessRecord ProcessRecord__new(ProcessPtr process, uint64_t cpu)
     Optional(ProcessUserWait) user_wait = None(ProcessUserWait);
     uint64_t user_wait_usec = Process__user_wait_usec(process, sampled_at_usec);
     match_optional(
-        process->queue_wait_control,
+        process->ipc.queue_wait_control,
         some(mapping)
         {
             ConstQueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
@@ -94,20 +94,20 @@ ProcessRecord ProcessRecord__new(ProcessPtr process, uint64_t cpu)
         },
         none_do_nothing()
     );
-    return (ProcessRecord){.pid = process->pid,
-                           .cpu = cpu,
-                           .sampled_at_usec = sampled_at_usec,
-                           .name = process->name,
-                           .state = process->state,
-                           .wait_reason = Process__top_park_reason(process),
-                           .user_wait = user_wait,
-                           .user_wait_usec = user_wait_usec,
-                           .process_class = process->process_class,
-                           .credentials = ProcessCredentials__new(process->user_id, process->group_id),
-                           .cpu_usage = CPUUsage__snapshot(&process->cpu_usage, sampled_at_usec, user_wait_usec),
-                           .queue_wait_usage = QueueWaitUsage__snapshot(&process->queue_wait_usage),
-                           .io_diagnostics = diagnostics,
-                           .memory =
-                               MemoryAccounting__usage(&process->kernel->memory_accounting,
-                                                       ProcessPageTable__root(&process->page_table).virtual_addr)};
+    return (ProcessRecord){
+        .pid = process->pid,
+        .cpu = cpu,
+        .sampled_at_usec = sampled_at_usec,
+        .name = process->name,
+        .state = process->thread.state,
+        .wait_reason = Process__top_park_reason(process),
+        .user_wait = user_wait,
+        .user_wait_usec = user_wait_usec,
+        .process_class = process->scheduling.process_class,
+        .credentials = ProcessCredentials__new(process->user_id, process->group_id),
+        .cpu_usage = CPUUsage__snapshot(&process->accounting.cpu_usage, sampled_at_usec, user_wait_usec),
+        .queue_wait_usage = QueueWaitUsage__snapshot(&process->thread.queue_wait_usage),
+        .io_diagnostics = diagnostics,
+        .memory = MemoryAccounting__usage(&process->kernel->memory_accounting,
+                                          ProcessPageTable__root(&process->address_space.page_table).virtual_addr)};
 }

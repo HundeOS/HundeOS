@@ -57,7 +57,7 @@ Result(KAllocCode) DoorbellBacking__release(UserAddress self)
 
 Result(UserAddress) Process__doorbell(ProcessPtr self)
 {
-    match_optional(self->ipc_doorbell,
+    match_optional(self->ipc.ipc_doorbell,
         some(mapping)
         {
             return Success(UserAddress, mapping);
@@ -68,17 +68,18 @@ Result(UserAddress) Process__doorbell(ProcessPtr self)
         DoorbellBacking__new(),
         success(mapping)
         {
-            PageTable__map(&self->page_table, self->kernel, mapping, IPC_DOORBELL_PAGE_SIZE);
+            PageTable__map(&self->address_space.page_table, self->kernel, mapping, IPC_DOORBELL_PAGE_SIZE);
             match_result(
                 Process__record_user_allocation(self, mapping, IPC_DOORBELL_PAGE_SIZE, USER_ALLOCATION_DOORBELL),
                 success(_)
                 {
-                    self->ipc_doorbell = Some(UserAddress, mapping);
+                    self->ipc.ipc_doorbell = Some(UserAddress, mapping);
                     return Success(UserAddress, mapping);
                 },
                 error(code, message)
                 {
-                    PageTable__unmap(&self->page_table, self->kernel, mapping.virtual_addr, IPC_DOORBELL_PAGE_SIZE);
+                    PageTable__unmap(&self->address_space.page_table, self->kernel, mapping.virtual_addr,
+                                     IPC_DOORBELL_PAGE_SIZE);
                     DoorbellBacking__release(mapping);
                     return Error(UserAddress, message, code);
                 }
@@ -95,7 +96,7 @@ Result(UserAddress) Process__doorbell(ProcessPtr self)
 void Process__ring_doorbell(ProcessPtr self)
 {
     match_optional(
-        self->ipc_doorbell,
+        self->ipc.ipc_doorbell,
         some(mapping)
         {
             IpcEvent__ring(IpcDoorbell__mutable_event(k_v_ptr(mapping, IpcDoorbell)));
@@ -115,7 +116,7 @@ Result(Address) Process__queue_wait_control(ProcessPtr self)
         }
     );
     match_optional(
-        self->queue_wait_control,
+        self->ipc.queue_wait_control,
         some(mapping)
         {
             return Success(Address, mapping.virtual_addr);
@@ -127,7 +128,7 @@ Result(Address) Process__queue_wait_control(ProcessPtr self)
         success(mapping)
         {
             Kernel__memset(mapping.kernel_addr.virtual_addr, 0, sizeof(QueueWaitControl));
-            self->queue_wait_control = Some(UserAddress, mapping);
+            self->ipc.queue_wait_control = Some(UserAddress, mapping);
             return Success(Address, mapping.virtual_addr);
         },
         error(code, message)
@@ -147,7 +148,7 @@ void Process__publish_dispatch_trace(ProcessPtr self, ConstRequestTicketPtr tick
                                      uint64_t selected_at_usec, uint64_t dispatched_at_usec)
 {
     match_optional(
-        self->queue_wait_control,
+        self->ipc.queue_wait_control,
         some(mapping)
         {
             QueueDispatchTrace trace =
@@ -165,7 +166,7 @@ static bool Process__has_pending_notifications(ProcessPtr self)
     critical_section(
         scheduler->service_event_dispatcher.lock,
         {
-            events_pending = ServiceEvents__len(&self->service.events) != 0;
+            events_pending = ServiceEvents__len(&self->service_state.service.events) != 0;
         }
     );
     return events_pending || Buffers__has_pending_notifications(&scheduler->buffers, self) ||
@@ -187,7 +188,7 @@ bool Process__has_pending_queue_wait(ProcessPtr self)
 bool Process__doorbell_changed(ProcessPtr self, IpcEventGeneration observed)
 {
     match_optional(
-        self->ipc_doorbell,
+        self->ipc.ipc_doorbell,
         some(mapping)
         {
             return IpcEvent__changed(IpcDoorbell__event(k_v_ptr(mapping, IpcDoorbell)), observed);
@@ -197,19 +198,19 @@ bool Process__doorbell_changed(ProcessPtr self, IpcEventGeneration observed)
     return true;
 }
 
-void Process__arm_kernel_queue_wait(ProcessPtr self, IpcEventGeneration observed)
+void Thread__arm_kernel_queue_wait(ThreadPtr self, IpcEventGeneration observed)
 {
     self->queue_wait_doorbell = Some(IpcEventGeneration, observed);
 }
 
-void Process__clear_kernel_queue_wait(ProcessPtr self)
+void Thread__clear_kernel_queue_wait(ThreadPtr self)
 {
     self->queue_wait_doorbell = None(IpcEventGeneration);
 }
 
-bool Process__kernel_queue_wait_ready(ProcessPtr self)
+bool Thread__kernel_queue_wait_ready(ThreadPtr self)
 {
-    if (Process__has_pending_signal(self) || Process__has_pending_queue_wait(self))
+    if (Process__has_pending_signal(self->owner) || Process__has_pending_queue_wait(self->owner))
     {
         return true;
     }
@@ -218,7 +219,7 @@ bool Process__kernel_queue_wait_ready(ProcessPtr self)
         self->queue_wait_doorbell,
         some(observed)
         {
-            return Process__doorbell_changed(self, observed);
+            return Process__doorbell_changed(self->owner, observed);
         },
         none_do_nothing()
     );
@@ -251,7 +252,7 @@ Optional(QueueWaitPublication) Process__shared_wait(ProcessPtr self)
     }
 
     match_optional(
-        self->queue_wait_control,
+        self->ipc.queue_wait_control,
         some(mapping)
         {
             ConstQueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
@@ -272,14 +273,14 @@ Optional(QueueWaitPublication) Process__shared_wait(ProcessPtr self)
     return None(QueueWaitPublication);
 }
 
-bool Process__shared_wait_ready(ProcessPtr self)
+bool Thread__shared_wait_ready(ThreadPtr self)
 {
-    if (Process__has_ready_parked_operation(self, PARK_WAIT_QUEUE, &None(OperationKey)))
+    if (Thread__has_ready_parked_operation(self, PARK_WAIT_QUEUE, &None(OperationKey)))
     {
         return true;
     }
 
-    match_optional(Process__shared_wait(self),
+    match_optional(Process__shared_wait(self->owner),
         some(publication)
         {
             return false;
@@ -289,10 +290,15 @@ bool Process__shared_wait_ready(ProcessPtr self)
     return true;
 }
 
+bool Process__shared_wait_ready(ProcessPtr self)
+{
+    return Thread__shared_wait_ready(&self->thread);
+}
+
 bool Process__shared_wait_armed(ProcessPtr self)
 {
     match_optional(
-        self->queue_wait_control,
+        self->ipc.queue_wait_control,
         some(mapping)
         {
             ConstQueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
@@ -314,7 +320,7 @@ bool Process__shared_wait_armed(ProcessPtr self)
 QueueWaitCompletedUsec Process__user_wait_usec(ProcessPtr self, QueueWaitStartedAt sampled_at_usec)
 {
     match_optional(
-        self->queue_wait_control,
+        self->ipc.queue_wait_control,
         some(mapping)
         {
             ConstQueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);

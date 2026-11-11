@@ -5,7 +5,7 @@
 #include "../fixtures/kernel.h"
 #include "../fixtures/process.h"
 #include "../stubs/panic.h"
-#include "../stubs/process_context_layout.h"
+#include "../stubs/thread_context_layout.h"
 #include "../stubs/process.h"
 #include "ipc/channel_protocol.h"
 #include "ipc/queue_wait_control.h"
@@ -99,10 +99,10 @@ static void wait_on(ProcessPtr process)
         success_do_nothing(),
         error_test_fail()
     );
-    UserAddress mapping = unwrap_optional(process->queue_wait_control, (UserAddress){0});
+    UserAddress mapping = unwrap_optional(process->ipc.queue_wait_control, (UserAddress){0});
     QueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
     IpcEventGeneration observed = IpcEvent__generation(
-        IpcDoorbell__event(k_v_ptr(unwrap_optional(process->ipc_doorbell, (UserAddress){0}), IpcDoorbell)));
+        IpcDoorbell__event(k_v_ptr(unwrap_optional(process->ipc.ipc_doorbell, (UserAddress){0}), IpcDoorbell)));
     QueueWaitControl__begin(control);
     QueueWaitControl__commit(control, test_cpu_time_usec, QUEUE_WAIT_NO_DEADLINE, observed);
 }
@@ -126,9 +126,9 @@ void setUp(void)
     Process__set_hund_identity(p2);
     Process__set_hund_identity(p3);
     Process__set_hund_identity(relay);
-    relay->process_class = PROCESS_CLASS_SERVICE;
-    p2->process_class = PROCESS_CLASS_SERVICE;
-    p3->process_class = PROCESS_CLASS_SERVICE;
+    relay->scheduling.process_class = PROCESS_CLASS_SERVICE;
+    p2->scheduling.process_class = PROCESS_CLASS_SERVICE;
+    p3->scheduling.process_class = PROCESS_CLASS_SERVICE;
     match_result(Scheduler__schedule_on_cpu(scheduler, p1, 0),
         success_do_nothing(),
         error_test_fail()
@@ -157,9 +157,9 @@ void tearDown(void)
 void test_preemption_selects_under_lock_and_switches_after_unlock(void)
 {
     current_process_reset();
-    p1->state = PROC_STATE_RUNNING;
-    ProcessContext context = {0};
-    Scheduler__preempt(scheduler, 0, &Some(ProcessContextPtr, &context));
+    p1->thread.state = PROC_STATE_RUNNING;
+    ThreadContext context = {0};
+    Scheduler__preempt(scheduler, 0, &Some(ThreadContextPtr, &context));
     TEST_ASSERT_NOT_NULL(current_running_process());
     TEST_ASSERT_NOT_EQUAL(p1, current_running_process());
     TEST_ASSERT_FALSE(context_switched_with_scheduler_lock());
@@ -217,8 +217,8 @@ void test_unfinished_responder_returns_to_preferred_queue_after_dispatch(void)
     Scheduler__forget_preferred(scheduler, relay);
 
     TEST_ASSERT_EQUAL_PTR(p2, unwrap_optional(Scheduler__take_preferred(scheduler, cpu(0)), (ProcessPtr){}));
-    p2->state = PROC_STATE_INTERRUPTED;
-    p2->preferred_active = false;
+    p2->thread.state = PROC_STATE_INTERRUPTED;
+    p2->thread.preferred_active = false;
 
     Scheduler__refresh_preferred(scheduler);
 
@@ -235,14 +235,14 @@ void test_idle_fallback_selects_the_waiter_with_the_largest_dependency_impact(vo
     wait_on(p1);
     wait_on(p2);
     wait_on(p3);
-    relay->state = PROC_STATE_WAITING;
-    cpu(0)->idle_process->state = PROC_STATE_RUNNING;
+    relay->thread.state = PROC_STATE_WAITING;
+    cpu(0)->idle_process->thread.state = PROC_STATE_RUNNING;
 
     current_process_reset();
-    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+    Scheduler__preempt(scheduler, 0, &None(ThreadContextPtr));
 
     TEST_ASSERT_EQUAL_PTR(p3, current_running_process());
-    TEST_ASSERT_EQUAL_UINT64(1, QueueWaitUsage__snapshot(&p3->queue_wait_usage).speculative_selections);
+    TEST_ASSERT_EQUAL_UINT64(1, QueueWaitUsage__snapshot(&p3->thread.queue_wait_usage).speculative_selections);
 }
 
 void test_idle_fallback_uses_recent_activity_then_longest_waiting(void)
@@ -250,32 +250,32 @@ void test_idle_fallback_uses_recent_activity_then_longest_waiting(void)
     QueueConnectionID id = connect(p1, p2, &bstr("activity"));
     Queue first = attach(id, p1);
     Queue second = attach(id, p2);
-    CPUUsage__start(&p1->cpu_usage, test_cpu_time_usec, 0);
+    CPUUsage__start(&p1->accounting.cpu_usage, test_cpu_time_usec, 0);
     test_cpu_time_usec = PROCESS_CPU_TICK_USEC;
-    CPUUsage__stop(&p1->cpu_usage, test_cpu_time_usec, 0);
+    CPUUsage__stop(&p1->accounting.cpu_usage, test_cpu_time_usec, 0);
     test_cpu_time_usec = PROCESS_CPU_TICK_USEC * 2;
     wait_on(p1);
     wait_on(p2);
-    p1->last_tick = 10;
-    p2->last_tick = 0;
-    p3->state = PROC_STATE_WAITING;
-    relay->state = PROC_STATE_WAITING;
-    cpu(0)->idle_process->state = PROC_STATE_RUNNING;
+    p1->thread.last_tick = 10;
+    p2->thread.last_tick = 0;
+    p3->thread.state = PROC_STATE_WAITING;
+    relay->thread.state = PROC_STATE_WAITING;
+    cpu(0)->idle_process->thread.state = PROC_STATE_RUNNING;
 
     current_process_reset();
-    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+    Scheduler__preempt(scheduler, 0, &None(ThreadContextPtr));
     TEST_ASSERT_EQUAL_PTR(p1, current_running_process());
 
-    p1->state = PROC_STATE_WAITING;
-    p2->last_tick = 0;
-    p3->state = PROC_STATE_READY;
+    p1->thread.state = PROC_STATE_WAITING;
+    p2->thread.last_tick = 0;
+    p3->thread.state = PROC_STATE_READY;
     QueueConnectionID other_id = connect(p2, p3, &bstr("fairness"));
     Queue third = attach(other_id, p3);
     wait_on(p3);
-    p3->last_tick = 5;
-    cpu(0)->idle_process->state = PROC_STATE_RUNNING;
+    p3->thread.last_tick = 5;
+    cpu(0)->idle_process->thread.state = PROC_STATE_RUNNING;
     current_process_reset();
-    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+    Scheduler__preempt(scheduler, 0, &None(ThreadContextPtr));
     TEST_ASSERT_EQUAL_PTR(p2, current_running_process());
 }
 
@@ -284,18 +284,18 @@ void test_idle_fallback_never_resumes_a_kernel_blocked_user_waiter(void)
     QueueConnectionID id = connect(p1, p2, &bstr("blocked"));
     Queue queue = attach(id, p1);
     wait_on(p1);
-    p1->state = PROC_STATE_WAITING;
-    p2->state = PROC_STATE_WAITING;
-    p3->state = PROC_STATE_WAITING;
-    relay->state = PROC_STATE_WAITING;
-    cpu(0)->idle_process->state = PROC_STATE_RUNNING;
+    p1->thread.state = PROC_STATE_WAITING;
+    p2->thread.state = PROC_STATE_WAITING;
+    p3->thread.state = PROC_STATE_WAITING;
+    relay->thread.state = PROC_STATE_WAITING;
+    cpu(0)->idle_process->thread.state = PROC_STATE_RUNNING;
 
     current_process_reset();
-    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+    Scheduler__preempt(scheduler, 0, &None(ThreadContextPtr));
 
     TEST_ASSERT_NOT_EQUAL(p1, current_running_process());
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, p1->state);
-    TEST_ASSERT_EQUAL_UINT64(0, QueueWaitUsage__snapshot(&p1->queue_wait_usage).speculative_selections);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, p1->thread.state);
+    TEST_ASSERT_EQUAL_UINT64(0, QueueWaitUsage__snapshot(&p1->thread.queue_wait_usage).speculative_selections);
 }
 
 void test_reply_queues_caller_and_warm_ancestor_without_preemption(void)
@@ -305,15 +305,15 @@ void test_reply_queues_caller_and_warm_ancestor_without_preemption(void)
     wait_on(p1);
     wait_on(p2);
     reply(&child);
-    p3->state = PROC_STATE_RUNNING;
+    p3->thread.state = PROC_STATE_RUNNING;
     Scheduler__refresh_preferred(scheduler);
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, p3->state);
-    TEST_ASSERT_EQUAL(PROC_STATE_READY, p1->state);
-    TEST_ASSERT_TRUE(p1->preferred_warm);
-    TEST_ASSERT_TRUE(p2->preferred_warm);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, p3->thread.state);
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, p1->thread.state);
+    TEST_ASSERT_TRUE(p1->thread.preferred_warm);
+    TEST_ASSERT_TRUE(p2->thread.preferred_warm);
     ProcessPtr first = unwrap_optional(Scheduler__take_preferred(scheduler, cpu(1)), (ProcessPtr){});
     TEST_ASSERT_EQUAL_PTR(p2, first);
-    first->state = PROC_STATE_RUNNING;
+    first->thread.state = PROC_STATE_RUNNING;
     ProcessPtr second = unwrap_optional(Scheduler__take_preferred(scheduler, cpu(0)), (ProcessPtr){});
     TEST_ASSERT_EQUAL_PTR(p1, second);
 }
@@ -328,10 +328,10 @@ void test_residency_starts_on_dispatch_and_does_not_reset_on_timer_checks(void)
     Scheduler__forget_preferred(scheduler, relay);
     test_cpu_time_usec = 5000;
     TEST_ASSERT_EQUAL_PTR(p1, unwrap_optional(Scheduler__take_preferred(scheduler, cpu(1)), (ProcessPtr){}));
-    ContextSwitch selected = ContextSwitch__new(p1, &None(ProcessPtr));
+    ContextSwitch selected = ContextSwitch__new(&p1->thread, &None(ThreadPtr));
     ContextSwitch__switch(&selected);
-    TEST_ASSERT_EQUAL_UINT64(5000, p1->dispatched_at);
-    UserAddress mapping = unwrap_optional(p1->queue_wait_control, (UserAddress){0});
+    TEST_ASSERT_EQUAL_UINT64(5000, p1->thread.dispatched_at);
+    UserAddress mapping = unwrap_optional(p1->ipc.queue_wait_control, (UserAddress){0});
     match_optional(
         QueueWaitControl__take_dispatch(k_v_ptr(mapping, QueueWaitControl), &root.ticket),
         some(trace)
@@ -344,27 +344,27 @@ void test_residency_starts_on_dispatch_and_does_not_reset_on_timer_checks(void)
     );
     test_cpu_time_usec = 5000 + SCHEDULER_WARM_RESIDENCY_USEC - 1;
     TEST_ASSERT_TRUE(Process__retain_preferred(p1));
-    TEST_ASSERT_EQUAL_UINT64(5000, p1->dispatched_at);
+    TEST_ASSERT_EQUAL_UINT64(5000, p1->thread.dispatched_at);
     test_cpu_time_usec = 5000 + SCHEDULER_WARM_RESIDENCY_USEC;
     TEST_ASSERT_FALSE(Process__retain_preferred(p1));
 }
 
 void test_retained_preferred_process_remains_owned_by_its_running_cpu(void)
 {
-    p1->state = PROC_STATE_RUNNING;
-    p1->preferred_active = true;
-    p1->preferred_warm = true;
-    p1->dispatched_at = 0;
-    p1->migration_safe = false;
-    cpu(0)->switching_out = Some(ProcessPtr, p1);
+    p1->thread.state = PROC_STATE_RUNNING;
+    p1->thread.preferred_active = true;
+    p1->thread.preferred_warm = true;
+    p1->thread.dispatched_at = 0;
+    p1->thread.migration_safe = false;
+    cpu(0)->switching_out = Some(ThreadPtr, &p1->thread);
     test_cpu_time_usec = SCHEDULER_WARM_RESIDENCY_USEC - 1;
 
     current_process_reset();
-    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+    Scheduler__preempt(scheduler, 0, &None(ThreadContextPtr));
 
     TEST_ASSERT_NULL(current_running_process());
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, p1->state);
-    TEST_ASSERT_FALSE(p1->migration_safe);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, p1->thread.state);
+    TEST_ASSERT_FALSE(p1->thread.migration_safe);
     match_optional(cpu(0)->switching_out,
         some_test_fail(),
         none_do_nothing()
@@ -386,18 +386,18 @@ void test_preferred_selection_does_not_migrate_unfinished_switch_or_kernel_wait(
     reply(&root);
     Scheduler__refresh_preferred(scheduler);
     Scheduler__forget_preferred(scheduler, relay);
-    p1->migration_safe = false;
+    p1->thread.migration_safe = false;
     match_optional(Scheduler__take_preferred(scheduler, cpu(1)),
         some_test_fail(),
         none_do_nothing()
     );
-    p1->migration_safe = true;
-    p1->state = PROC_STATE_WAITING;
+    p1->thread.migration_safe = true;
+    p1->thread.state = PROC_STATE_WAITING;
     match_optional(Scheduler__take_preferred(scheduler, cpu(1)),
         some_test_fail(),
         none_do_nothing()
     );
-    p1->state = PROC_STATE_INTERRUPTED;
+    p1->thread.state = PROC_STATE_INTERRUPTED;
     TEST_ASSERT_EQUAL_PTR(p1, unwrap_optional(Scheduler__take_preferred(scheduler, cpu(1)), (ProcessPtr){}));
     match_optional(ProcessTable__find_item(&cpu(0)->processes, p1),
         some_test_fail(),
@@ -407,23 +407,31 @@ void test_preferred_selection_does_not_migrate_unfinished_switch_or_kernel_wait(
         some_do_nothing(),
         none_test_fail()
     );
+    match_optional(ThreadTable__find_item(&cpu(0)->threads, &p1->thread),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    match_optional(ThreadTable__find_item(&cpu(1)->threads, &p1->thread),
+        some_do_nothing(),
+        none_test_fail()
+    );
 }
 
 void test_ready_exec_continuation_preempts_an_active_preferred_process(void)
 {
-    KernelContext context = KernelContext__new(&None(ProcessID), &None(SchedulerPtr));
+    KernelContext context = KernelContext__new(&None(ThreadPtr), &None(SchedulerPtr));
     ParkedOperationPtr operation = ParkedOperation__heap_new(&context, &None(Continuation), PARK_WAIT_EXEC_LOAD);
     match_result(Process__push_parked_operation(p1, operation),
         success_do_nothing(),
         error_test_fail()
     );
     ParkedOperation__mark_ready(operation);
-    p1->state = PROC_STATE_INTERRUPTED;
-    p2->state = PROC_STATE_RUNNING;
-    p2->preferred_active = true;
+    p1->thread.state = PROC_STATE_INTERRUPTED;
+    p2->thread.state = PROC_STATE_RUNNING;
+    p2->thread.preferred_active = true;
 
     current_process_reset();
-    Scheduler__preempt(scheduler, 0, &None(ProcessContextPtr));
+    Scheduler__preempt(scheduler, 0, &None(ThreadContextPtr));
 
     TEST_ASSERT_EQUAL_PTR(p1, current_running_process());
 }
@@ -481,7 +489,7 @@ void test_parent_generation_and_handler_must_match(void)
 
 void test_ancestry_cycles_are_bounded_and_rejected(void)
 {
-    p1->process_class = PROCESS_CLASS_SERVICE;
+    p1->scheduling.process_class = PROCESS_CLASS_SERVICE;
     TestRequest root = request(p1, p2, &bstr("a"), &bstr("b"), &None(RequestTicket));
     TestRequest child = request(p2, p1, &bstr("a"), &bstr("c"), &Some(RequestTicket, root.ticket));
     root.ticket.metadata.parent_connection = child.ticket.connection;
@@ -519,7 +527,7 @@ void test_preferred_processing_yields_on_shared_wait_before_budget(void)
     Scheduler__refresh_preferred(scheduler);
     Scheduler__forget_preferred(scheduler, relay);
     TEST_ASSERT_EQUAL_PTR(p2, unwrap_optional(Scheduler__take_preferred(scheduler, cpu(0)), (ProcessPtr){}));
-    p2->dispatched_at = 0;
+    p2->thread.dispatched_at = 0;
     test_cpu_time_usec = 100;
     TEST_ASSERT_TRUE(Process__retain_preferred(p2));
     wait_on(p2);

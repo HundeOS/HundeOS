@@ -34,9 +34,19 @@ only that process's reference until the final reference closes.
 
 ## Current Constraints
 
+Prepared, unpublished children are owned by a PID-keyed collection on their
+parent. `RESUME` and `ABORT` atomically claim one child; parent disposal aborts
+any that remain. On publication, the scheduler adds each live child to its
+parent's non-owning child list. Child exit removes it, while parent exit drains
+the list. These transitions and child-exit notification use the same scheduler
+lock, so a departing parent cannot be dereferenced by a concurrent child exit.
+Surviving children become parentless and `getppid`
+reports zero after their parent exits. Their later exit produces no parent
+signal or child event because there is no parent to receive one.
+
 `Process` already contains an architecture-specific saved context, a process
 page table, allocation metadata, parent identity, credentials, and child-event
-storage. Both architectures provide `ProcessContext__copy` and
+storage. Both architectures provide `ThreadContext__copy` and
 `Process__set_syscall_result`, which are sufficient to express the two fork
 return values once a child context exists.
 
@@ -89,10 +99,10 @@ kernel-only root in `satp`; that root retains the shared supervisor mappings.
 Both paths complete the required translation invalidation and barriers before
 returning. Only then may exit cleanup release the old memory and tables.
 
-This does not stop a remote CPU using an address space. Any future teardown
-of a remotely running process must first establish that the other CPU has
-stopped using it; the local detach operation is not a remote reclamation
-protocol.
+Local detachment alone does not stop a remote CPU using an address space.
+Process exit marks the image terminating, blocks new dispatch, requests remote
+rescheduling, and waits for remote address-space switches before this local
+detachment and reclamation. Overlay exec still rejects a process with siblings.
 
 ## Stage 1: Eager-Copy Fork
 

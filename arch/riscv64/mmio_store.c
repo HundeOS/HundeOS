@@ -7,12 +7,12 @@
 #define RISCV_COMPRESSED_STORE_DOUBLE 0x7U
 #define RISCV_FENCE_IORW_IORW 0x0ff0000fU
 
-static Address RiscVMMIOStore__address(ProcessContextPtr context, uint32_t base_register, int64_t offset)
+static Address RiscVMMIOStore__address(ThreadContextPtr context, uint32_t base_register, int64_t offset)
 {
     return context->x[base_register] + (uint64_t)offset;
 }
 
-static Optional(RiscVMMIOStore) RiscVMMIOStore__standard(uint32_t instruction, ProcessContextPtr context)
+static Optional(RiscVMMIOStore) RiscVMMIOStore__standard(uint32_t instruction, ThreadContextPtr context)
 {
     if ((instruction & 0x7fU) != RISCV_OPCODE_STORE)
     {
@@ -34,7 +34,7 @@ static Optional(RiscVMMIOStore) RiscVMMIOStore__standard(uint32_t instruction, P
     return Some(RiscVMMIOStore, store);
 }
 
-static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_register(uint16_t instruction, ProcessContextPtr context)
+static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_register(uint16_t instruction, ThreadContextPtr context)
 {
     uint32_t operation = instruction >> 13U;
     uint32_t source_register = 8U + ((instruction >> 2U) & 0x7U);
@@ -65,7 +65,7 @@ static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_register(uint16_t ins
     return Some(RiscVMMIOStore, store);
 }
 
-static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_stack(uint16_t instruction, ProcessContextPtr context)
+static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_stack(uint16_t instruction, ThreadContextPtr context)
 {
     uint32_t operation = instruction >> 13U;
     uint32_t source_register = (instruction >> 2U) & 0x1fU;
@@ -94,7 +94,7 @@ static Optional(RiscVMMIOStore) RiscVMMIOStore__compressed_stack(uint16_t instru
     return Some(RiscVMMIOStore, store);
 }
 
-Optional(RiscVMMIOStore) RiscVMMIOStore__decode(uint32_t instruction, ProcessContextPtr context)
+Optional(RiscVMMIOStore) RiscVMMIOStore__decode(uint32_t instruction, ThreadContextPtr context)
 {
     if ((instruction & 0x3U) == 0x3U)
     {
@@ -114,7 +114,7 @@ Optional(RiscVMMIOStore) RiscVMMIOStore__decode(uint32_t instruction, ProcessCon
     return None(RiscVMMIOStore);
 }
 
-void RiscVMMIOStore__perform(ConstRiscVMMIOStorePtr self, Address access_address, ProcessContextPtr context)
+void RiscVMMIOStore__perform(ConstRiscVMMIOStorePtr self, Address access_address, ThreadContextPtr context)
 {
     if (self->width == sizeof(uint8_t))
     {
@@ -135,7 +135,7 @@ void RiscVMMIOStore__perform(ConstRiscVMMIOStorePtr self, Address access_address
     context->sepc += self->instruction_size;
 }
 
-bool RiscVMMIOStore__skip_following_fence(uint32_t instruction, ProcessContextPtr context)
+bool RiscVMMIOStore__skip_following_fence(uint32_t instruction, ThreadContextPtr context)
 {
     if (instruction != RISCV_FENCE_IORW_IORW)
     {

@@ -44,13 +44,13 @@ static Result(SystemCallResult) SignalControl__action(ProcessPtr process, Proces
 }
 
 static Result(SystemCallResult)
-    SignalControl__mask(ProcessPtr process, ProcessSignalControlRequestPtr target, ProcessSignalControlRequest request)
+    SignalControl__mask(ThreadPtr thread, ProcessSignalControlRequestPtr target, ProcessSignalControlRequest request)
 {
-    request.previous_mask = Process__signal_mask(process);
+    request.previous_mask = Thread__signal_mask(thread);
     if (request.replace != 0)
     {
         match_result(
-            Process__set_signal_mask(process, request.mask_operation, request.mask),
+            Thread__set_signal_mask(thread, request.mask_operation, request.mask),
             success(_)
             {
                 target->previous_mask = request.previous_mask;
@@ -67,8 +67,9 @@ static Result(SystemCallResult)
     return Success(SystemCallResult, PROCESS_SIGNAL_OK);
 }
 
-Result(SystemCallResult) Signal__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
-                                         Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    Signal__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                    Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     int64_t target = (int64_t)arg1;
     ProcessSignal signal = (ProcessSignal)arg2;
@@ -77,6 +78,28 @@ Result(SystemCallResult) Signal__handler(KernelPtr kernel, OptionalPtr(ProcessPt
         *proc,
         some(sender)
         {
+            if (arg3 == PROCESS_SIGNAL_ORIGIN_TERMINAL)
+            {
+                if (signal != PROCESS_SIGNAL_INTERRUPT)
+                {
+                    return Error(SystemCallResult, invalid_signal_control, PROCESS_SIGNAL_INVALID_ARGUMENT);
+                }
+                match_result(
+                    Scheduler__send_terminal_interrupt(kernel->scheduler, sender, target),
+                    success(process_id)
+                    {
+                        return Success(SystemCallResult, PROCESS_SIGNAL_OK);
+                    },
+                    error(code, message)
+                    {
+                        return Error(SystemCallResult, message, code);
+                    }
+                );
+            }
+            if (arg3 != PROCESS_SIGNAL_ORIGIN_PROCESS)
+            {
+                return Error(SystemCallResult, invalid_signal_control, PROCESS_SIGNAL_INVALID_ARGUMENT);
+            }
             match_result(
                 Scheduler__send_signal(kernel->scheduler, sender, target, signal),
                 success(process_id)
@@ -95,8 +118,9 @@ Result(SystemCallResult) Signal__handler(KernelPtr kernel, OptionalPtr(ProcessPt
     return Error(SystemCallResult, invalid_signal_control, PROCESS_SIGNAL_INVALID_ARGUMENT);
 }
 
-Result(SystemCallResult) SignalControl__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                                Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    SignalControl__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                           Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     if (arg1 == 0)
     {
@@ -109,18 +133,23 @@ Result(SystemCallResult) SignalControl__handler(KernelPtr kernel, OptionalPtr(Pr
         *proc,
         some(process)
         {
+            ThreadPtr thread = unwrap_optional(*caller_thread, &process->thread);
+            if (thread->owner != process)
+            {
+                return Error(SystemCallResult, invalid_signal_control, PROCESS_SIGNAL_INVALID_ARGUMENT);
+            }
             switch (request.operation)
             {
             case PROCESS_SIGNAL_CONTROL_ACTION:
                 return SignalControl__action(process, target, request);
             case PROCESS_SIGNAL_CONTROL_MASK:
-                return SignalControl__mask(process, target, request);
+                return SignalControl__mask(thread, target, request);
             case PROCESS_SIGNAL_CONTROL_PENDING:
-                target->previous_mask = Process__pending_signal_mask(process);
+                target->previous_mask = Thread__pending_signal_mask(thread);
                 return Success(SystemCallResult, PROCESS_SIGNAL_OK);
             case PROCESS_SIGNAL_CONTROL_SUSPEND:
                 match_result(
-                    Scheduler__signal_suspend(kernel->scheduler, process, request.mask),
+                    Scheduler__signal_suspend(kernel->scheduler, thread, request.mask),
                     success(suspended)
                     {
                         return Error(SystemCallResult, bstr("Signal suspend pending"), SYSCALL_IO_BLOCK);
@@ -143,15 +172,21 @@ Result(SystemCallResult) SignalControl__handler(KernelPtr kernel, OptionalPtr(Pr
     return Error(SystemCallResult, invalid_signal_control, PROCESS_SIGNAL_INVALID_ARGUMENT);
 }
 
-Result(SystemCallResult) SignalReturn__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                               Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    SignalReturn__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                          Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     match_optional(
         *proc,
         some(process)
         {
+            ThreadPtr thread = unwrap_optional(*caller_thread, &process->thread);
+            if (thread->owner != process)
+            {
+                return Error(SystemCallResult, invalid_signal_control, PROCESS_SIGNAL_INVALID_ARGUMENT);
+            }
             match_result(
-                Process__restore_signal_context(process),
+                Thread__restore_signal_context(thread),
                 success(_)
                 {
                     return Success(SystemCallResult, SYSCALL_CONTEXT_RESTORED);

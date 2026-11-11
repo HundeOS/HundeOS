@@ -6,6 +6,12 @@
 #include "sys/queue_wait.h"
 #include "io/client.h"
 #include "sys/boot_info.h"
+#include "ipc/ipc_platform.h"
+
+uint64_t hunde_rust_monotonic_usec(void)
+{
+    return IpcPlatform__monotonic_usec();
+}
 
 static RustConsoleResult RustConsoleResult__new(bool framebuffer)
 {

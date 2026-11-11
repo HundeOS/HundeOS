@@ -28,6 +28,7 @@ typedef struct OriginatingContext
     CallType type;
     KernelPtr kernel;
     Optional(ProcessPtr) process;
+    Optional(ThreadPtr) thread;
 
     union
     {

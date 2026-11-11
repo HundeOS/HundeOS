@@ -2,12 +2,13 @@
 
 extern crate alloc;
 
+mod config;
 mod interrupts;
 
 use alloc::format;
 use alloc::vec::Vec;
 use hunde::abi::IoError;
-use hunde::boot::{BlockDriverConfiguration, InterruptController, VirtioDeviceConfiguration};
+use hunde::boot::{InterruptController, VirtioDeviceConfiguration, VirtioEndpointConfiguration};
 use hunde::driver::{self, Client, Event, Listener, Manager, Response};
 use hunde::wuff::{BundledDriver, LoadedDriver};
 use hunde_virtio_blk::probe_slots;
@@ -90,7 +91,7 @@ pub fn run() -> Result<(), IoError> {
                 return Err(IoError(hunde::protocol::SERVICE_DEVICE_REGISTRATION_FAILED));
             }
             let path = format!("/dev/virtio{}", count + 1);
-            let configuration = BlockDriverConfiguration::new(virtio, slot, path.as_bytes())?;
+            let configuration = VirtioEndpointConfiguration::new(virtio, slot, path.as_bytes())?;
             let irq = virtio
                 .first_irq
                 .checked_add(slot)
@@ -153,6 +154,41 @@ pub fn run() -> Result<(), IoError> {
         listener.publish_ready(b"/dev/mmc0")?;
         drivers.push(driver);
         sdhci_irq = Some(sd_host.device.irq);
+    }
+    for definition in config::parse(&hunde::bootstrap::read_file(
+        b"/sbin/config/io-host.conf",
+        16 * 1024,
+    )?)? {
+        if let Some(device_id) = definition.device_id {
+            if let Some(hardware) = hardware.virtio_mmio {
+                let slots = hunde::virtio::probe_slots(hardware, device_id)?;
+                for (index, slot) in (0..64)
+                    .filter(|slot| slots & (1_u64 << slot) != 0)
+                    .enumerate()
+                {
+                    let endpoint = format!("{}.{}", definition.name, index);
+                    let configuration =
+                        VirtioEndpointConfiguration::new(hardware, slot, endpoint.as_bytes())?;
+                    let irq = hardware
+                        .first_irq
+                        .checked_add(slot)
+                        .ok_or(IoError(hunde::protocol::SERVICE_INVALID_BUFFER))?;
+                    registrations.reserve_hosted(irq)?;
+                    manager.route_self(irq)?;
+                    let driver = LoadedDriver::load(definition.image, &configuration.wire_bytes())?;
+                    if driver.irq() != Some(irq) {
+                        return Err(IoError(hunde::protocol::SERVICE_DEVICE_REGISTRATION_FAILED));
+                    }
+                    drivers.push(driver);
+                }
+            }
+        } else {
+            let driver = LoadedDriver::load(definition.image, definition.name.as_bytes())?;
+            if driver.irq().is_some() {
+                return Err(IoError(hunde::protocol::SERVICE_DEVICE_REGISTRATION_FAILED));
+            }
+            drivers.push(driver);
+        }
     }
     listener.publish_ready(ENDPOINT)?;
     hunde::runtime::log(b"Rust driver host ready");

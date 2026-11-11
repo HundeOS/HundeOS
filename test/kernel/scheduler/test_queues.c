@@ -7,7 +7,7 @@
 #include "../stubs/kalloc.h"
 #include "../stubs/panic.h"
 #include "../stubs/process.h"
-#include "../stubs/process_context_layout.h"
+#include "../stubs/thread_context_layout.h"
 #include "../stubs/cpu.h"
 #include "../../../kernel/scheduler/shared_wait.h"
 #include "../../../kernel/scheduler/preferred.h"
@@ -33,7 +33,7 @@ void setUp(void)
     server = dummy_process(10, 0, PROC_STATE_READY);
     client = dummy_process(20, 0, PROC_STATE_READY);
     other = dummy_process(30, 0, PROC_STATE_READY);
-    server->process_class = PROCESS_CLASS_SERVICE;
+    server->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(server);
     Scheduler__schedule_on_cpu(kernel->scheduler, server, 0);
     Scheduler__schedule_on_cpu(kernel->scheduler, client, 0);
@@ -75,7 +75,7 @@ static QueueWaitControlPtr shared_control(ProcessPtr process)
         error_test_fail()
     );
     match_optional(
-        process->queue_wait_control,
+        process->ipc.queue_wait_control,
         some(mapping)
         {
             return k_v_ptr(mapping, QueueWaitControl);
@@ -159,7 +159,7 @@ static QueueEndpointID register_locked_listener(ProcessPtr process, ConstBString
 void test_scheduler_listener_registration_holds_lock_through_allocation_and_publication(void)
 {
     observed_listener_allocations = 0;
-    other->process_class = PROCESS_CLASS_SERVICE;
+    other->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(other);
     QueueEndpointID first = register_locked_listener(server, &bstr("first-locked-listener"));
     QueueEndpointID second = register_locked_listener(other, &bstr("second-locked-listener"));
@@ -198,9 +198,9 @@ static void assert_split_listener(size_t first_count)
     BString name = bstr("/dev/virtio5");
     Address source = split_listener_name(&name, first_count, true, false);
     Optional(ProcessPtr) caller = Some(ProcessPtr, server);
-    match_result(Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, source, 0, 0, 0),
-        success_do_nothing(),
-                 error_test_fail()
+    match_result(Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, source, 0, 0, 0, &None(ThreadPtr)),
+                 success_do_nothing(),
+        error_test_fail()
     );
     connect_queue(find_endpoint(&name), client);
     TEST_ASSERT_TRUE(mutex_trylock(&kernel->scheduler->scheduler_lock));
@@ -371,7 +371,7 @@ static QueueWaitCode wait_observed(ProcessPtr process, IpcEventGeneration observ
     QueueWaitControl__begin(control);
     QueueWaitControl__commit(control, test_cpu_time_usec, QUEUE_WAIT_NO_DEADLINE, observed);
     match_result(
-        Scheduler__queue_wait(kernel->scheduler, process, observed, ticks),
+        Scheduler__queue_wait(kernel->scheduler, &process->thread, observed, ticks),
         success(code)
         {
             return code;
@@ -484,23 +484,23 @@ void test_scheduler_retains_reply_processing_after_consumption_until_budget_expi
     Queue sender = attach_queue(id, server);
     Queue receiver = attach_queue(id, client);
     QueueMessage message = QueueMessage__new(0, 1);
-    other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
-    client->last_tick = 100;
+    other->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    client->thread.last_tick = 100;
     assert_push_success(&sender, &message);
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->state);
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->state);
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->thread.state);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->thread.state);
     match_result(Queue__pop(&receiver),
         success_do_nothing(),
         error_test_fail()
     );
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->state);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->thread.state);
     test_cpu_time_usec += SCHEDULER_PREFERRED_BUDGET_USEC;
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->state);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->thread.state);
 }
 
 void test_scheduler_prioritises_request_receiver_on_yield(void)
@@ -508,11 +508,11 @@ void test_scheduler_prioritises_request_receiver_on_yield(void)
     QueueConnectionID id = accepted_connection();
     Queue sender = attach_queue(id, client);
     QueueMessage message = QueueMessage__new(0, 1);
-    other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    other->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
     assert_push_success(&sender, &message);
-    client->state = PROC_STATE_WAITING;
-    Scheduler__yield_waiting(kernel->scheduler, client, 0);
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    client->thread.state = PROC_STATE_WAITING;
+    Scheduler__yield_waiting(kernel->scheduler, &client->thread, 0);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
 }
 
 void test_scheduler_keeps_blocked_receiver_blocked(void)
@@ -521,12 +521,12 @@ void test_scheduler_keeps_blocked_receiver_blocked(void)
     Queue sender = attach_queue(id, client);
     QueueMessage message = QueueMessage__new(0, 1);
     assert_push_success(&sender, &message);
-    server->state = PROC_STATE_WAITING;
-    other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->state);
+    server->thread.state = PROC_STATE_WAITING;
+    other->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->thread.state);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, other->thread.state);
 }
 
 void test_live_unread_queue_state_overrides_the_published_doorbell_generation(void)
@@ -538,10 +538,10 @@ void test_live_unread_queue_state_overrides_the_published_doorbell_generation(vo
     assert_push_success(&sender, &message);
     publish_shared_wait(server, shared_control(server));
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
-    other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    other->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
 }
 
 static Queue publish_wait_with_unread_message_on_another_connection(void)
@@ -562,33 +562,33 @@ static Queue publish_wait_with_unread_message_on_another_connection(void)
 void test_unread_message_on_any_owned_connection_makes_the_process_ready(void)
 {
     Queue sender = publish_wait_with_unread_message_on_another_connection();
-    other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    other->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
     TEST_ASSERT_TRUE(Process__has_pending_messages(server));
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
 
     QueueMessage message = QueueMessage__new(0, 1);
     assert_push_success(&sender, &message);
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
 }
 
 void test_current_receiver_keeps_cpu_while_any_owned_connection_is_unread(void)
 {
     Queue sender = publish_wait_with_unread_message_on_another_connection();
-    server->state = PROC_STATE_RUNNING;
-    other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    server->thread.state = PROC_STATE_RUNNING;
+    other->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
 
     QueueMessage message = QueueMessage__new(0, 1);
     assert_push_success(&sender, &message);
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
 }
 
 void test_scheduler_rotates_between_queued_receivers_after_processing_budget(void)
@@ -599,27 +599,28 @@ void test_scheduler_rotates_between_queued_receivers_after_processing_budget(voi
     QueueMessage message = QueueMessage__new(0, 1);
     assert_push_success(&client_queue, &message);
     assert_push_success(&server_queue, &message);
-    server->last_tick = 0;
-    client->last_tick = 100;
-    other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    server->thread.last_tick = 0;
+    client->thread.last_tick = 100;
+    other->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
     test_cpu_time_usec += SCHEDULER_PREFERRED_BUDGET_USEC;
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->state);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, client->thread.state);
 }
 
 void test_scheduler_prioritises_pending_service_events(void)
 {
-    other->process_class = PROCESS_CLASS_REALTIME_SERVICE;
-    match_result(ServiceEvents__push(&server->service.events, ServiceEvent__new(SERVICE_EVENT_IRQ, 42, 1)),
-                 success_do_nothing(),
+    other->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
+    match_result(
+        ServiceEvents__push(&server->service_state.service.events, ServiceEvent__new(SERVICE_EVENT_IRQ, 42, 1)),
+        success_do_nothing(),
         error_test_fail()
     );
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
 }
 
 void test_queue_wait_detects_publication_between_snapshot_and_park(void)
@@ -634,8 +635,8 @@ void test_queue_wait_detects_publication_between_snapshot_and_park(void)
     QueueMessage message = {0};
     assert_push_success(&sender, &message);
     TEST_ASSERT_EQUAL(QUEUE_WAIT_CHANGED, wait_observed(server, observed, 3));
-    TEST_ASSERT_EQUAL_UINT64(0, QueueWaitUsage__snapshot(&server->queue_wait_usage).parks);
-    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->state);
+    TEST_ASSERT_EQUAL_UINT64(0, QueueWaitUsage__snapshot(&server->thread.queue_wait_usage).parks);
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->thread.state);
     TEST_ASSERT_FALSE(Process__has_parked_operation(server, PARK_WAIT_QUEUE, &None(OperationKey)));
 }
 
@@ -666,8 +667,8 @@ void test_shared_wait_tracks_publication_and_does_not_allocate_a_parked_operatio
     ProcessInfo info = ProcessRecord__info(&record);
     TEST_ASSERT_EQUAL_STRING("USER_WAIT 1.234s", info.wait_reason);
     TEST_ASSERT_EQUAL_UINT64(1234567, info.user_wait_usec);
-    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->state);
-    TEST_ASSERT_EQUAL_UINT64(0, ParkedOperations__len(&server->parked_operations));
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->thread.state);
+    TEST_ASSERT_EQUAL_UINT64(0, ParkedOperations__len(&server->thread.parked_operations));
     QueueMessage message = {0};
     assert_push_success(&sender, &message);
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
@@ -760,12 +761,17 @@ void test_signal_wakes_process_from_shared_wait(void)
 
 void test_child_exit_wakes_parent_from_shared_wait(void)
 {
-    QueueConnectionID id = connect_queue(listen_queue(), client);
+    ProcessPtr child = dummy_process_with_parent(40, 0, PROC_STATE_READY, server);
+    match_result(Scheduler__schedule_on_cpu(kernel->scheduler, child, 0),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    QueueConnectionID id = connect_queue(listen_queue(), child);
     QueueWaitControlPtr control = shared_control(server);
     publish_shared_wait(server, control);
     IpcEventGeneration generation = observed_doorbell(server);
-    KernelContext context = KernelContext__new(&Some(ProcessID, server->pid), &Some(SchedulerPtr, kernel->scheduler));
-    client->parent = Some(ProcessPtr, server);
+    KernelContext context =
+        KernelContext__new(&Some(ThreadPtr, &server->thread), &Some(SchedulerPtr, kernel->scheduler));
     match_result(
         Scheduler__child_wait_with_context_ownership(kernel->scheduler, server, &context, &None(Continuation), false,
                                                      -1, false),
@@ -776,13 +782,13 @@ void test_child_exit_wakes_parent_from_shared_wait(void)
         }
     );
 
-    match_result(Scheduler__exit(kernel->scheduler, client, 0),
+    match_result(Scheduler__exit(kernel->scheduler, child, 0),
         success_do_nothing(),
         error_test_fail()
     );
 
     TEST_ASSERT_TRUE(Process__doorbell_changed(server, generation));
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, server->thread.state);
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
 }
 
@@ -791,7 +797,7 @@ void test_shared_wait_mapping_is_reused_and_cannot_be_freed_or_shared(void)
     QueueWaitControlPtr first = shared_control(server);
     TEST_ASSERT_EQUAL_PTR(first, shared_control(server));
     match_optional(
-        server->queue_wait_control,
+        server->ipc.queue_wait_control,
         some(mapping)
         {
             match_result(
@@ -823,12 +829,13 @@ void test_shared_wait_is_skipped_by_scheduler_and_service_events_override_it(voi
         error_test_fail()
     );
     publish_shared_wait(server, shared_control(server));
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_NOT_EQUAL(PROC_STATE_RUNNING, server->state);
-    TEST_ASSERT_TRUE(client->state == PROC_STATE_RUNNING || other->state == PROC_STATE_RUNNING);
-    match_result(ServiceEvents__push(&server->service.events, ServiceEvent__new(SERVICE_EVENT_IRQ, 42, 1)),
-                 success_do_nothing(),
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_NOT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
+    TEST_ASSERT_TRUE(client->thread.state == PROC_STATE_RUNNING || other->thread.state == PROC_STATE_RUNNING);
+    match_result(
+        ServiceEvents__push(&server->service_state.service.events, ServiceEvent__new(SERVICE_EVENT_IRQ, 42, 1)),
+        success_do_nothing(),
         error_test_fail()
     );
     TEST_ASSERT_TRUE(Process__shared_wait_ready(server));
@@ -843,24 +850,24 @@ void test_queue_wait_parks_and_timer_detects_peer_publication(void)
     );
     Queue sender = attach_queue(id, client);
     TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_current(server, 3));
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->thread.state);
     QueueMessage message = {0};
     assert_push_success(&sender, &message);
-    ProcessContext context = {0};
+    ThreadContext context = {0};
     test_cpu_time_usec = 7000;
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&server->queue_wait_usage);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&server->thread.queue_wait_usage);
     TEST_ASSERT_EQUAL_UINT64(1, usage.parks);
     TEST_ASSERT_EQUAL_UINT64(1, usage.activity_wakes);
     TEST_ASSERT_EQUAL_UINT64(0, usage.timeout_wakes);
     TEST_ASSERT_EQUAL_UINT64(7000, usage.parked_usec);
-    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->state);
+    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->thread.state);
 }
 
 void test_queue_wait_on_another_cpu_detects_peer_publication_when_process_yields(void)
 {
     ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
-    remote_server->process_class = PROCESS_CLASS_SERVICE;
+    remote_server->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(remote_server);
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, remote_server, 1),
         success_do_nothing(),
@@ -882,16 +889,16 @@ void test_queue_wait_on_another_cpu_detects_peer_publication_when_process_yields
     );
     Queue sender = attach_queue(id, client);
     TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_current(remote_server, QUEUE_WAIT_INDEFINITE_TICKS));
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, remote_server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, remote_server->thread.state);
 
     QueueMessage message = {0};
     assert_push_success(&sender, &message);
-    client->state = PROC_STATE_WAITING;
+    client->thread.state = PROC_STATE_WAITING;
     test_cpu_time_usec = 7000;
-    Scheduler__yield_waiting(kernel->scheduler, client, 0);
+    Scheduler__yield_waiting(kernel->scheduler, &client->thread, 0);
 
-    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&remote_server->queue_wait_usage);
-    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, remote_server->state);
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&remote_server->thread.queue_wait_usage);
+    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, remote_server->thread.state);
     TEST_ASSERT_EQUAL_UINT64(1, usage.activity_wakes);
     TEST_ASSERT_EQUAL_UINT64(7000, usage.parked_usec);
 }
@@ -904,7 +911,15 @@ void test_service_queue_notification_yields_to_local_receiver_on_single_cpu(void
     TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_current(server, QUEUE_WAIT_INDEFINITE_TICKS));
 
     Optional(ProcessPtr) current = Scheduler__current_process(kernel->scheduler, 0);
-    ContextSwitch to_client = ContextSwitch__new(client, &current);
+    Optional(ThreadPtr) current_thread = None(ThreadPtr);
+    match_optional(current,
+        some(process)
+        {
+            current_thread = Some(ThreadPtr, &process->thread);
+        },
+        none_do_nothing()
+    );
+    ContextSwitch to_client = ContextSwitch__new(&client->thread, &current_thread);
     ContextSwitch__switch(&to_client);
     TEST_ASSERT_EQUAL_PTR(client, current_running_process());
 
@@ -912,7 +927,7 @@ void test_service_queue_notification_yields_to_local_receiver_on_single_cpu(void
     assert_push_success(&sender, &message);
     Optional(ProcessPtr) process = Some(ProcessPtr, client);
     match_result(
-        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0),
+        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0, &None(ThreadPtr)),
         success(status)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, status);
@@ -921,9 +936,9 @@ void test_service_queue_notification_yields_to_local_receiver_on_single_cpu(void
     );
 
     TEST_ASSERT_EQUAL_PTR(server, current_running_process());
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, client->state);
-    ProcessContextPtr client_context = unwrap_optional(client->context, (ProcessContextPtr){});
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, client->thread.state);
+    ThreadContextPtr client_context = unwrap_optional(client->thread.context, (ThreadContextPtr){});
     TEST_ASSERT_EQUAL(SERVICE_OK, client_context->x[0]);
     TEST_ASSERT_EQUAL_UINT64(0, CPUStub__reschedule_count());
     TEST_ASSERT_FALSE(context_switched_with_scheduler_lock());
@@ -937,7 +952,15 @@ void test_service_queue_notification_yields_to_local_receiver_with_completed_wai
     TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_current(server, QUEUE_WAIT_INDEFINITE_TICKS));
 
     Optional(ProcessPtr) current = Scheduler__current_process(kernel->scheduler, 0);
-    ContextSwitch to_client = ContextSwitch__new(client, &current);
+    Optional(ThreadPtr) current_thread = None(ThreadPtr);
+    match_optional(current,
+        some(process)
+        {
+            current_thread = Some(ThreadPtr, &process->thread);
+        },
+        none_do_nothing()
+    );
+    ContextSwitch to_client = ContextSwitch__new(&client->thread, &current_thread);
     ContextSwitch__switch(&to_client);
     TEST_ASSERT_EQUAL_PTR(client, current_running_process());
 
@@ -951,12 +974,12 @@ void test_service_queue_notification_yields_to_local_receiver_with_completed_wai
         },
         error_test_fail()
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, server->thread.state);
     TEST_ASSERT_TRUE(Process__has_ready_parked_operation(server, PARK_WAIT_QUEUE, &None(OperationKey)));
 
     Optional(ProcessPtr) process = Some(ProcessPtr, client);
     match_result(
-        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0),
+        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0, &None(ThreadPtr)),
         success(status)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, status);
@@ -965,7 +988,7 @@ void test_service_queue_notification_yields_to_local_receiver_with_completed_wai
     );
 
     TEST_ASSERT_EQUAL_PTR(server, current_running_process());
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, server->thread.state);
     TEST_ASSERT_EQUAL_UINT64(0, CPUStub__reschedule_count());
     TEST_ASSERT_FALSE(context_switched_with_scheduler_lock());
 }
@@ -973,7 +996,7 @@ void test_service_queue_notification_yields_to_local_receiver_with_completed_wai
 void test_queue_notification_wakes_remote_waiter_and_coalesces_reschedule(void)
 {
     ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
-    remote_server->process_class = PROCESS_CLASS_SERVICE;
+    remote_server->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(remote_server);
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, remote_server, 1),
         success_do_nothing(),
@@ -996,17 +1019,17 @@ void test_queue_notification_wakes_remote_waiter_and_coalesces_reschedule(void)
     test_cpu_time_usec = 7000;
     Optional(ProcessPtr) process = Some(ProcessPtr, client);
     match_result(
-        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0),
+        Service__handler(kernel, &process, SERVICE_QUEUE_DATA_AVAILABLE, id, 0, 0, 0, &None(ThreadPtr)),
         success(status)
         {
             TEST_ASSERT_EQUAL(SERVICE_OK, status);
         },
         error_test_fail()
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, remote_server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, remote_server->thread.state);
     TEST_ASSERT_EQUAL_UINT64(1, CPUStub__reschedule_count());
     TEST_ASSERT_EQUAL_UINT64(1, CPUStub__rescheduled_cpu());
-    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&remote_server->queue_wait_usage);
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&remote_server->thread.queue_wait_usage);
     TEST_ASSERT_EQUAL_UINT64(1, usage.activity_wakes);
     TEST_ASSERT_EQUAL_UINT64(7000, usage.parked_usec);
 
@@ -1043,7 +1066,7 @@ void test_queue_notification_wakes_remote_waiter_and_coalesces_reschedule(void)
 static void assert_notification_pokes_runnable_receiver(ProcessState state)
 {
     ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
-    remote_server->process_class = PROCESS_CLASS_SERVICE;
+    remote_server->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(remote_server);
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, remote_server, 1),
         success_do_nothing(),
@@ -1059,7 +1082,7 @@ static void assert_notification_pokes_runnable_receiver(ProcessState state)
         error_test_fail()
     );
     Queue sender = attach_queue(id, client);
-    remote_server->state = state;
+    remote_server->thread.state = state;
 
     QueueMessage message = {0};
     assert_push_success(&sender, &message);
@@ -1072,7 +1095,7 @@ static void assert_notification_pokes_runnable_receiver(ProcessState state)
         },
         error_test_fail()
     );
-    TEST_ASSERT_EQUAL(state, remote_server->state);
+    TEST_ASSERT_EQUAL(state, remote_server->thread.state);
 }
 
 void test_queue_notification_pokes_interrupted_receiver_with_live_unread_data(void)
@@ -1083,7 +1106,7 @@ void test_queue_notification_pokes_interrupted_receiver_with_live_unread_data(vo
 void test_queue_notification_does_not_interrupt_running_userspace_waiter(void)
 {
     ProcessPtr remote_server = dummy_process(40, 1, PROC_STATE_READY);
-    remote_server->process_class = PROCESS_CLASS_SERVICE;
+    remote_server->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(remote_server);
     match_result(Scheduler__schedule_on_cpu(kernel->scheduler, remote_server, 1),
         success_do_nothing(),
@@ -1099,7 +1122,7 @@ void test_queue_notification_does_not_interrupt_running_userspace_waiter(void)
         error_test_fail()
     );
     Queue sender = attach_queue(id, client);
-    remote_server->state = PROC_STATE_RUNNING;
+    remote_server->thread.state = PROC_STATE_RUNNING;
 
     QueueMessage message = {0};
     assert_push_success(&sender, &message);
@@ -1116,26 +1139,26 @@ void test_queue_notification_does_not_interrupt_running_userspace_waiter(void)
 void test_queue_wait_times_out_after_requested_ticks(void)
 {
     TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_current(server, 3));
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->state);
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->thread.state);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->thread.state);
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->thread.state);
 }
 
 void test_indefinite_queue_wait_does_not_expire_on_timer_interrupts(void)
 {
     TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_current(server, QUEUE_WAIT_INDEFINITE_TICKS));
-    ProcessContext context = {0};
+    ThreadContext context = {0};
     for (Tick tick = 0; tick < QUEUE_WAIT_MAX_TICKS + 1; tick++)
     {
-        Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
+        Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
     }
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->thread.state);
     TEST_ASSERT_TRUE(Process__has_parked_operation(server, PARK_WAIT_QUEUE, &None(OperationKey)));
-    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&server->queue_wait_usage);
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&server->thread.queue_wait_usage);
     TEST_ASSERT_EQUAL_UINT64(0, usage.timeout_wakes);
 }
 
@@ -1180,14 +1203,14 @@ void test_process_doorbells_are_isolated_between_processes(void)
 void test_queue_wait_validates_timeout(void)
 {
     match_result(
-        Scheduler__queue_wait(kernel->scheduler, server, observed_doorbell(server), QUEUE_WAIT_MAX_TICKS + 1),
+        Scheduler__queue_wait(kernel->scheduler, &server->thread, observed_doorbell(server), QUEUE_WAIT_MAX_TICKS + 1),
         success_test_fail(),
         error(code, message)
         {
             TEST_ASSERT_EQUAL(QUEUE_INVALID, code);
         }
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->thread.state);
 }
 
 void test_queue_wait_syscall_returns_deferred_dispatch_marker(void)
@@ -1195,15 +1218,75 @@ void test_queue_wait_syscall_returns_deferred_dispatch_marker(void)
     IpcEventGeneration observed = observed_doorbell(server);
     publish_shared_wait(server, shared_control(server));
     match_result(
-        Service__handler(kernel, &Some(ProcessPtr, server), SERVICE_QUEUE_WAIT, observed, 3, 0, 0),
+        Service__handler(kernel, &Some(ProcessPtr, server), SERVICE_QUEUE_WAIT, observed, 3, 0, 0,
+                         &Some(ThreadPtr, &server->thread)),
         success_test_fail(),
         error(code, message)
         {
             TEST_ASSERT_EQUAL(SYSCALL_IO_BLOCK, code);
         }
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_WAITING, server->thread.state);
     TEST_ASSERT_TRUE(Process__has_parked_operation(server, PARK_WAIT_QUEUE, &None(OperationKey)));
+}
+
+void test_queue_notification_wakes_each_thread_waiting_on_shared_doorbell(void)
+{
+    Stack stack = Stack__new(4096);
+    Thread sibling = Thread__new(server, &stack);
+    sibling.state = PROC_STATE_READY;
+    CPUSchedulerPtr cpu = unwrap_optional(CPUSchedulers__get(&kernel->scheduler->schedulers, 0), (CPUSchedulerPtr){});
+    match_result(ThreadTable__push(&cpu->threads, &sibling),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    IpcEventGeneration observed = observed_doorbell(server);
+    publish_shared_wait(server, shared_control(server));
+    match_result(
+        Scheduler__queue_wait(kernel->scheduler, &server->thread, observed, QUEUE_WAIT_INDEFINITE_TICKS),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, code);
+        },
+        error_test_fail()
+    );
+    match_result(
+        Scheduler__queue_wait(kernel->scheduler, &sibling, observed, QUEUE_WAIT_INDEFINITE_TICKS),
+        success(code)
+        {
+            TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, code);
+        },
+        error_test_fail()
+    );
+
+    IpcEvent__ring(IpcDoorbell__mutable_event(process_doorbell(server)));
+    match_result(Scheduler__wake_shared_wait(kernel->scheduler, server),
+        success_do_nothing(),
+        error_test_fail()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, server->thread.state);
+    TEST_ASSERT_EQUAL(PROC_STATE_INTERRUPTED, sibling.state);
+    TEST_ASSERT_TRUE(Thread__has_ready_parked_operation(&server->thread, PARK_WAIT_QUEUE, &None(OperationKey)));
+    TEST_ASSERT_TRUE(Thread__has_ready_parked_operation(&sibling, PARK_WAIT_QUEUE, &None(OperationKey)));
+
+    match_optional(
+        Thread__pop_ready_parked_operation(&server->thread),
+        some(operation)
+        {
+            ParkedOperation__dispose(operation);
+        },
+        none_test_fail()
+    );
+    match_optional(
+        Thread__pop_ready_parked_operation(&sibling),
+        some(operation)
+        {
+            ParkedOperation__dispose(operation);
+        },
+        none_test_fail()
+    );
+    ThreadTable__remove(&cpu->threads, &sibling);
 }
 
 void test_pending_service_event_prevents_queue_park(void)
@@ -1213,14 +1296,14 @@ void test_pending_service_event_prevents_queue_park(void)
                  error_test_fail()
     );
     match_result(
-        Scheduler__queue_wait(kernel->scheduler, server, observed_doorbell(server), 3),
+        Scheduler__queue_wait(kernel->scheduler, &server->thread, observed_doorbell(server), 3),
         success(code)
         {
             TEST_ASSERT_EQUAL(QUEUE_WAIT_CHANGED, code);
         },
         error_test_fail()
     );
-    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->thread.state);
 }
 
 void test_pending_listener_arrival_prevents_queue_park(void)
@@ -1228,7 +1311,7 @@ void test_pending_listener_arrival_prevents_queue_park(void)
     connect_queue(listen_queue(), client);
 
     TEST_ASSERT_EQUAL(QUEUE_WAIT_CHANGED, wait_current(server, 3));
-    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->thread.state);
 }
 
 void test_closed_connection_prevents_surviving_peer_from_parking(void)
@@ -1240,7 +1323,7 @@ void test_closed_connection_prevents_surviving_peer_from_parking(void)
     );
 
     TEST_ASSERT_EQUAL(QUEUE_WAIT_CHANGED, wait_current(server, 3));
-    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_READY, server->thread.state);
 }
 
 void test_queue_timeout_has_distinct_completion_code(void)
@@ -1256,7 +1339,7 @@ void test_queue_timeout_has_distinct_completion_code(void)
         },
         none_test_fail()
     );
-    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&server->queue_wait_usage);
+    ProcessQueueWaitUsage usage = QueueWaitUsage__snapshot(&server->thread.queue_wait_usage);
     TEST_ASSERT_EQUAL_UINT64(1, usage.timeout_wakes);
     TEST_ASSERT_EQUAL_UINT64(0, usage.activity_wakes);
     TEST_ASSERT_EQUAL_UINT64(50000, usage.parked_usec);
@@ -1286,9 +1369,9 @@ void test_queue_wait_arrivals_are_owned_and_wake_on_connect(void)
     TEST_ASSERT_EQUAL(QUEUE_WAIT_PARKED, wait_observed(server, observed, 3));
     connect_queue(endpoint, client);
     TEST_ASSERT_TRUE(Process__doorbell_changed(server, observed));
-    ProcessContext context = {0};
-    Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
-    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->state);
+    ThreadContext context = {0};
+    Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
+    TEST_ASSERT_NOT_EQUAL(PROC_STATE_WAITING, server->thread.state);
 }
 
 static void accept_queue(QueueConnectionID id)
@@ -1313,7 +1396,8 @@ static bool mapped(ProcessPtr process, Address address, bool write)
         address >= QUEUE_LISTENER_BASE && address < QUEUE_LISTENER_BASE + QUEUE_LISTENER_LIMIT * QUEUE_ARRIVALS_SIZE
             ? QUEUE_ARRIVALS_SIZE
             : QUEUE_PAGE_SIZE;
-    return check_address_mapped(ProcessPageTable__root_table(&process->page_table), address, true, write, false, size);
+    return check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table), address, true, write,
+                                false, size);
 }
 
 void test_queue_pages_have_isolated_asymmetric_permissions(void)
@@ -1702,11 +1786,11 @@ void test_signal_keeps_queue_mapped_until_owner_cpu_performs_teardown(void)
     TEST_ASSERT_TRUE(mapped(server, QueueLayout__address(id), false));
     TEST_ASSERT_EQUAL_UINT64(endpoint, find_endpoint(&bstr("protected-test")));
 
-    ProcessContext context = {0};
+    ThreadContext context = {0};
     Scheduler__start(kernel->scheduler, 0);
     for (size_t tick = 0; tick < 4; tick++)
     {
-        Scheduler__preempt(kernel->scheduler, 0, &Some(ProcessContextPtr, &context));
+        Scheduler__preempt(kernel->scheduler, 0, &Some(ThreadContextPtr, &context));
     }
     match_optional(Scheduler__find_process_by_pid(kernel->scheduler, pid),
         some_test_fail(),
@@ -1785,7 +1869,7 @@ void test_listener_permission_duplicate_name_and_connection_admission(void)
         }
     );
     QueueEndpointID endpoint = listen_queue();
-    other->process_class = PROCESS_CLASS_SERVICE;
+    other->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(other);
     match_result(
         Queues__listen(queues, other, &bstr("protected-test")),
@@ -1843,7 +1927,7 @@ void test_allocation_failure_publishes_no_connection_and_invalid_name_pointer_is
     TEST_ASSERT_EQUAL_UINT64(0, QueueConnections__len(&queues->connections));
     Optional(ProcessPtr) caller = Some(ProcessPtr, server);
     match_result(
-        Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, UINT64_MAX, 0, 0, 0),
+        Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, UINT64_MAX, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -1855,7 +1939,7 @@ void test_allocation_failure_publishes_no_connection_and_invalid_name_pointer_is
 void test_shared_memory_manager_can_broker_more_than_ordinary_client_limit(void)
 {
     QueueEndpointID endpoint = listen_queue();
-    other->process_class = PROCESS_CLASS_SERVICE;
+    other->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(other);
     for (uint64_t index = 0; index < QUEUE_CLIENT_CONNECTION_LIMIT + 1; index++)
     {
@@ -1898,7 +1982,7 @@ void test_all_1024_connection_slots_are_usable_and_recycled_with_fresh_handles(v
 {
     TEST_ASSERT_EQUAL(1024, QUEUE_LIMIT);
     QueueEndpointID endpoint = listen_queue();
-    other->process_class = PROCESS_CLASS_SERVICE;
+    other->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(other);
     QueueConnectionID last = 0;
     for (QueueSlotIndex index = 0; index < QUEUE_LIMIT; index++)
@@ -1960,7 +2044,7 @@ void test_queue_syscalls_copy_tracked_name_and_bind_caller_identity(void)
     Kernel__memcopy((Address)&name, memory.kernel_addr.virtual_addr, sizeof(name));
     Optional(ProcessPtr) caller = Some(ProcessPtr, server);
     match_result(
-        Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, memory.virtual_addr, 0, 0, 0),
+        Service__handler(kernel, &caller, SERVICE_QUEUE_LISTEN, memory.virtual_addr, 0, 0, 0, &None(ThreadPtr)),
         success(address)
         {
             TEST_ASSERT_EQUAL_HEX64(QUEUE_LISTENER_BASE, address);
@@ -1970,7 +2054,7 @@ void test_queue_syscalls_copy_tracked_name_and_bind_caller_identity(void)
     QueueEndpointID endpoint = find_endpoint(&name);
     caller = Some(ProcessPtr, client);
     match_result(
-        Service__handler(kernel, &caller, SERVICE_QUEUE_CONNECT, endpoint, 9999, 0, 0),
+        Service__handler(kernel, &caller, SERVICE_QUEUE_CONNECT, endpoint, 9999, 0, 0, &None(ThreadPtr)),
         success(id)
         {
             Queue queue = attach_queue(id, client);

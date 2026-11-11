@@ -287,21 +287,23 @@ directory, inherit a snapshot through a redirected external command, and read
 They also verify that no standalone procfs process runs.
 The same procfs assertions are separately runnable as
 `test_qemu_rust_procfs_component` on AArch64 and RISC-V. This focused case passes
-on both targets; it does not replace or skip the combined I/O smoke, whose
-intermittent RISC-V console/pipe stalls remain tracked.
-A complete run passes on both architectures; repeated RISC-V runs can still
-time out, including with only a partial command echo. This reliability issue
-and the unconfirmed cause are recorded in [TODO](../../TODO.md); a passing run
-does not establish repeatability.
+on both targets; it does not replace or skip the combined I/O smoke. Historical
+RISC-V console/pipe stalls, their incomplete root-cause attribution, and later
+validation after proven fixes are centralized in
+[INT-004](../../INTERMITTENT_ISSUES.md#int-004). The newer login timeout is tracked
+separately in [INT-001](../../INTERMITTENT_ISSUES.md#int-001); a passing retry does
+not close an unresolved report.
 
 Build the real service/module with `make ARCH=aarch64 rust-io` or
 `make ARCH=riscv64 rust-io`. The component's `no_main` link target enables full
 LTO of `core` and `alloc` into PIC; linking the prebuilt bare-metal archives
 directly would retain non-PIC panic metadata. All exported interfaces use the
-versioned C ABI in `common_includes/hunde/io_component.h`. I/O uses version 6
-and `hunde_io_component_entry_v6`; the separate lifecycle ABI remains version 1.
-Version 6 appends the boot-information snapshot callback to the host table
-(72 bytes). C and Rust share the generated version constant; old I/O tables
+versioned C ABI in `common_includes/hunde/io_component.h`. I/O uses version 7
+and `hunde_io_component_entry_v7`; the separate lifecycle ABI remains version 1.
+Version 7 appends the generic component advance/deadline callback to the
+component descriptor (48 bytes). The host table (72 bytes), request layout,
+and completion layout are unchanged from version 6. C and Rust share the
+generated version constant; old I/O tables
 are rejected. `hunde::boot` alone normalizes native optionals, union members,
 and result tags into typed Rust records.
 

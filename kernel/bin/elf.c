@@ -168,7 +168,84 @@ Result(Elf) Elf__validate(ConstElfPtr self)
             }
         }
     );
-    return entry_found ? Success(Elf, *self) : Error(Elf, invalid, -1);
+    if (!entry_found)
+    {
+        return Error(Elf, invalid, -1);
+    }
+    match_result(
+        Elf__thread_local_image(self),
+        success(_)
+        {
+            return Success(Elf, *self);
+        },
+        error(code, message)
+        {
+            return Error(Elf, message, code);
+        }
+    );
+    return Error(Elf, invalid, -1);
+}
+
+Result(ThreadLocalImage) Elf__thread_local_image(ConstElfPtr self)
+{
+    BString invalid = bstr("Invalid executable TLS image");
+    if (!Elf__valid_header(self))
+    {
+        return Error(ThreadLocalImage, invalid, -1);
+    }
+    ThreadLocalImage image = ThreadLocalImage__new(0, 0, 0, 1);
+    bool found = false;
+    ProgramHeaderArray headers = Elf__read_program_headers(self);
+    uint64_t file_size = self->end - self->start;
+    for_each_fa(
+        ProgramHeaderArray,
+        headers,
+        index,
+        segment,
+        {
+            if (segment->type != ThreadlocalTemplate)
+            {
+                continue;
+            }
+            uint64_t alignment = segment->alignment > 0 ? segment->alignment : 1;
+            if (found || segment->file_size > segment->memory_size || segment->memory_size > 16 * 1024 * 1024 ||
+                alignment > 65536 || (alignment & (alignment - 1)) != 0 ||
+                segment->virtual_address % alignment != 0 || segment->segment_offset > file_size ||
+                segment->file_size > file_size - segment->segment_offset)
+            {
+                return Error(ThreadLocalImage, invalid, -1);
+            }
+            bool mapped = segment->file_size == 0;
+            for_each_fa(
+                ProgramHeaderArray,
+                headers,
+                load_index,
+                load,
+                {
+                    if (load->type == Load && (load->flags & Read) &&
+                        segment->virtual_address >= load->virtual_address &&
+                        segment->virtual_address - load->virtual_address <= load->file_size)
+                    {
+                        uint64_t offset = segment->virtual_address - load->virtual_address;
+                        if (segment->file_size <= load->file_size - offset &&
+                            load->segment_offset <= UINT64_MAX - offset &&
+                            load->segment_offset + offset == segment->segment_offset)
+                        {
+                            mapped = true;
+                        }
+                    }
+                }
+            );
+            if (!mapped)
+            {
+                return Error(ThreadLocalImage, invalid, -1);
+            }
+            image = ThreadLocalImage__new(segment->virtual_address, segment->file_size, segment->memory_size,
+                                          alignment);
+            found = true;
+        }
+    );
+    return Success(ThreadLocalImage, image);
 }
 
 static Address Elf__page_start(Address address)
@@ -339,5 +416,6 @@ Optional(ExpandedSegment) Elf__entry_segment(ConstElfPtr self, ExpandedSegmentAr
             }
         }
     );
+
     return None(ExpandedSegment);
 }

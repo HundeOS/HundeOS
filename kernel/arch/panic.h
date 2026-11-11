@@ -5,6 +5,6 @@
 
 extern void Kernel__halt();
 extern void Kernel__halt_all();
-extern void Kernel__dump_state(ProcessContextPtr ctx);
-extern void Kernel__dump_context(ProcessContextPtr ctx);
+extern void Kernel__dump_state(ThreadContextPtr ctx);
+extern void Kernel__dump_context(ThreadContextPtr ctx);
 #endif

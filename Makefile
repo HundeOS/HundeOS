@@ -77,7 +77,7 @@ CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -O2 -
            -I./arch/$(ARCH)/boot/common -I./arch/$(ARCH)/boot/$(BOOT_PLATFORM) $(EXTRA_KERNEL_CFLAGS)
 
 USER_CFLAGS = -c -MMD -MP -ffreestanding -fno-pic -fno-pie -fno-stack-protector -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
-	           -nostdlib -nostartfiles $(ARCH_USER_CFLAGS) \
+	           -nostdlib -nostartfiles -D__DYNAMIC_REENT__ $(ARCH_USER_CFLAGS) \
 	           -I./user/lib/arch/$(ARCH)/include -I./user/lib/fiber/arch/$(ARCH) -I./user/lib -I./common -I./common_includes -I./user/lib/newlib/include \
 	           -I./vendor/openbsd/src/include -idirafter $(NEWLIB_INCLUDE_DIR)
 
@@ -133,7 +133,7 @@ NEWLIB_INCLUDE_DIR = $(NEWLIB_INSTALL_PREFIX)/include
 NEWLIB_LIB_DIR = $(NEWLIB_INSTALL_PREFIX)/lib
 NEWLIB_CONFIGURE_STAMP = $(NEWLIB_BUILD_DIR)/.configured
 NEWLIB_INSTALL_STAMP = $(NEWLIB_INSTALL_DIR)/.installed
-NEWLIB_CFLAGS = -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector $(ARCH_USER_CFLAGS)
+NEWLIB_CFLAGS = -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -D__DYNAMIC_REENT__ $(ARCH_USER_CFLAGS)
 NEWLIB_LIBC_ARCHIVE = $(NEWLIB_LIB_DIR)/libc.a
 NEWLIB_LIBC_SELECTED_DIR = $(PLATFORM_BUILD_ROOT)/newlib/libc-selected
 NEWLIB_LIBC_SELECTED_STAMP = $(NEWLIB_LIBC_SELECTED_DIR)/.extracted
@@ -145,7 +145,7 @@ NEWLIB_PIC_INCLUDE_DIR = $(NEWLIB_PIC_INSTALL_PREFIX)/include
 NEWLIB_PIC_LIB_DIR = $(NEWLIB_PIC_INSTALL_PREFIX)/lib
 NEWLIB_PIC_CONFIGURE_STAMP = $(NEWLIB_PIC_BUILD_DIR)/.configured
 NEWLIB_PIC_INSTALL_STAMP = $(NEWLIB_PIC_INSTALL_DIR)/.installed
-NEWLIB_PIC_CFLAGS = -O2 -ffreestanding -fPIC -fno-stack-protector $(ARCH_USER_CFLAGS)
+NEWLIB_PIC_CFLAGS = -O2 -ffreestanding -fPIC -fno-stack-protector -D__DYNAMIC_REENT__ $(ARCH_USER_CFLAGS)
 NEWLIB_PIC_LIBC_ARCHIVE = $(NEWLIB_PIC_LIB_DIR)/libc.a
 NEWLIB_PIC_LIBC_SELECTED_DIR = $(PLATFORM_BUILD_ROOT)/newlib-pic/libc-selected
 NEWLIB_PIC_LIBC_SELECTED_STAMP = $(NEWLIB_PIC_LIBC_SELECTED_DIR)/.extracted
@@ -180,7 +180,7 @@ NEWLIB_LIBC_MEMBERS = \
 	libc_a-strtoull.o
 NEWLIB_LIBC_OBJECTS = $(addprefix $(NEWLIB_LIBC_SELECTED_DIR)/,$(NEWLIB_LIBC_MEMBERS))
 NEWLIB_PIC_LIBC_OBJECTS = $(addprefix $(NEWLIB_PIC_LIBC_SELECTED_DIR)/,$(NEWLIB_LIBC_MEMBERS))
-NEWLIB_LIBC_ALLOWED_UNDEFINED = __errno _impure_ptr
+NEWLIB_LIBC_ALLOWED_UNDEFINED = __errno __getreent
 ifeq ($(COMPILE_COMMANDS),1)
 NEWLIB_INSTALL_PREREQUISITE =
 NEWLIB_PIC_INSTALL_PREREQUISITE =
@@ -491,6 +491,10 @@ RUST_CARGO_DIR := $(PLATFORM_BUILD_ROOT)/rust
 RUST_RELEASE_DIR := $(RUST_CARGO_DIR)/$(RUST_COMPONENT_TARGET)/release
 RUST_IO_HOST_ARCHIVE := $(RUST_RELEASE_DIR)/libhunde_io_host.a
 RUST_DRIVER_HOST_ARCHIVE := $(RUST_RELEASE_DIR)/libhunde_treiber_host.a
+RUST_NIC_PROBE_ARCHIVE := $(RUST_RELEASE_DIR)/libhunde_network_nic_probe.a
+RUST_NIC_PROBE_BINARY := $(USER_BUILD_DIR)/network_nic_probe.bin
+RUST_NETWORK_PROBE_ARCHIVE := $(RUST_RELEASE_DIR)/libhunde_network_probe.a
+RUST_NETWORK_PROBE_BINARY := $(USER_BUILD_DIR)/network_probe.bin
 RUST_MEMFS_BINARY := $(RUST_CARGO_DIR)/memfs.wuff
 RUST_PROCFS_BINARY := $(RUST_CARGO_DIR)/procfs.wuff
 RUST_SYSINFOFS_BINARY := $(RUST_CARGO_DIR)/sysinfofs.wuff
@@ -498,22 +502,32 @@ RUST_EXT2_BINARY := $(RUST_CARGO_DIR)/ext2fs.wuff
 RUST_FAT32_BINARY := $(RUST_CARGO_DIR)/fat32.wuff
 RUST_DEVFS_BINARY := $(RUST_CARGO_DIR)/devfs.wuff
 RUST_EMBEDFS_BINARY := $(RUST_CARGO_DIR)/embedfs.wuff
-RUST_IO_COMPONENT_ENTRY := hunde_io_component_entry_v6
+RUST_IO_COMPONENT_ENTRY := hunde_io_component_entry_v7
 RUST_PIPE_BINARY := $(RUST_CARGO_DIR)/pipe.wuff
 RUST_SOCKET_BINARY := $(RUST_CARGO_DIR)/socket.wuff
+RUST_NETWORK_BINARY := $(RUST_CARGO_DIR)/network.wuff
 UART_RX_WUFF_BINARY := $(RUST_CARGO_DIR)/uart_rx.wuff
+VIRTIO_NET_WUFF_BINARY := $(RUST_CARGO_DIR)/virtio_net.wuff
+QEMU_NET_ARGS ?= -nic none
+QEMU_TEST_BLOCK_ARGS ?= \
+	-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 -device virtio-blk-device,drive=hd2 \
+	-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 -device virtio-blk-device,drive=sd0 \
+	-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 -device virtio-blk-device,drive=channelio0 \
+	-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 -device virtio-blk-device,drive=channelio1 \
+	-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 -device virtio-blk-device,drive=hostedext2
+NET_DUMMY_WUFF_BINARY := $(RUST_CARGO_DIR)/net_dummy.wuff
 UART_TX_WUFF_BINARY := $(RUST_CARGO_DIR)/uart_tx.wuff
 VIRTIO_BLK_WUFF_BINARY := $(RUST_CARGO_DIR)/virtio_blk.wuff
 VIRTIO_KEYBOARD_WUFF_BINARY := $(RUST_CARGO_DIR)/virtio_keyboard.wuff
 SDHCI_WUFF_BINARY := $(RUST_CARGO_DIR)/sdhci.wuff
-RUST_CRATE_DIRS := user/drivers/devfs user/drivers/embedfs user/drivers/memfs user/drivers/uart_rx user/drivers/uart_tx user/drivers/virtio_blk user/drivers/virtio_keyboard user/drivers/sdhci user/services/hund-rohr user/lib/hunde user/services/hunde-io-host user/services/hunde-treiber-host user/drivers/socket user/components/rust_smoke user/drivers/procfs user/drivers/sysinfofs user/drivers/ext2fs user/drivers/fat32fs
-RUST_PROTOCOL_INPUTS := common/ipc/io_protocol.h common/ipc/buffer.h common/hardware/boot_info.h common_includes/hunde/io_component.h common_includes/hunde/boot_info.h common_includes/hunde/host_component.h common_includes/syscalls/io.h common_includes/syscalls/service.h common_includes/syscalls/mem.h tools/generate_rust_io_constants.py config/io-host.conf config/bootstrap.fstab
+RUST_CRATE_DIRS := user/drivers/virtio_net user/components/network_nic_probe user/drivers/net_dummy user/services/hunde-network user/drivers/devfs user/drivers/embedfs user/drivers/memfs user/drivers/uart_rx user/drivers/uart_tx user/drivers/virtio_blk user/drivers/virtio_keyboard user/drivers/sdhci user/services/hund-rohr user/lib/hunde user/services/hunde-io-host user/services/hunde-treiber-host user/drivers/socket user/components/rust_smoke user/components/network_probe user/drivers/procfs user/drivers/sysinfofs user/drivers/ext2fs user/drivers/fat32fs
+RUST_PROTOCOL_INPUTS := common/ipc/packet_protocol.h common/ipc/io_protocol.h common/ipc/buffer.h common/hardware/boot_info.h common_includes/hunde/io_component.h common_includes/hunde/boot_info.h common_includes/hunde/host_component.h common_includes/syscalls/io.h common_includes/syscalls/service.h common_includes/syscalls/mem.h tools/generate_rust_io_constants.py config/io-host.conf config/bootstrap.fstab
 RUST_IO_SOURCES := $(shell find $(RUST_CRATE_DIRS) -name '*.rs' -print -o -name Cargo.toml -print) user/Cargo.toml user/Cargo.lock $(RUST_PROTOCOL_INPUTS)
 RUST_IO_SOURCES += common/ipc/interrupt_protocol.h common_includes/hunde/driver_component.h
 hunde-io-host_EXTRA_OBJS := $(RUST_IO_HOST_ARCHIVE)
 
 USER_BINARY_ROOTS := user/programs user/commands user/drivers user/services
-USER_COMPONENT_DIRS := user/drivers/devfs user/drivers/embedfs user/drivers/memfs user/drivers/socket user/drivers/uart_rx user/drivers/uart_tx user/drivers/virtio_blk user/drivers/virtio_keyboard user/drivers/sdhci user/services/hund-rohr user/drivers/procfs user/drivers/sysinfofs user/drivers/fat32fs
+USER_COMPONENT_DIRS := user/drivers/virtio_net user/drivers/net_dummy user/services/hunde-network user/drivers/devfs user/drivers/embedfs user/drivers/memfs user/drivers/socket user/drivers/uart_rx user/drivers/uart_tx user/drivers/virtio_blk user/drivers/virtio_keyboard user/drivers/sdhci user/services/hund-rohr user/drivers/procfs user/drivers/sysinfofs user/drivers/fat32fs
 USER_BINARY_DIRS := $(filter-out $(USER_COMPONENT_DIRS),$(foreach root,$(USER_BINARY_ROOTS),$(shell find $(root) -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)))
 WUFF_INTERPRETER_DIR := user/programs/wuff-ld
 ROOTFS_COMMAND_NAMES := cat cp env fs-latency grep kill ln ls mkdir mv ps rm shutdown tail write
@@ -592,7 +606,10 @@ EMBEDDED_FS_INPUTS := \
 	components/devfs.wuff=$(RUST_DEVFS_BINARY) \
 	components/embedfs.wuff=$(RUST_EMBEDFS_BINARY) \
 	components/socket.wuff=$(RUST_SOCKET_BINARY) \
+	components/network.wuff=$(RUST_NETWORK_BINARY) \
 	components/uart_rx.wuff=$(UART_RX_WUFF_BINARY) \
+	components/virtio_net.wuff=$(VIRTIO_NET_WUFF_BINARY) \
+	components/net_dummy.wuff=$(NET_DUMMY_WUFF_BINARY) \
 	components/uart_tx.wuff=$(UART_TX_WUFF_BINARY) \
 	components/virtio_blk.wuff=$(VIRTIO_BLK_WUFF_BINARY) \
 	components/virtio_keyboard.wuff=$(VIRTIO_KEYBOARD_WUFF_BINARY) \
@@ -655,7 +672,8 @@ rust-component-smoke-all:
 	$(MAKE) ARCH=aarch64 rust-component-smoke
 	$(MAKE) ARCH=riscv64 rust-component-smoke
 
-$(NEWLIB_CONFIGURE_STAMP): user/lib/newlib/configure.sh vendor/newlib/README.md vendor/newlib/src/configure
+$(NEWLIB_CONFIGURE_STAMP): user/lib/newlib/configure.sh vendor/newlib/README.md vendor/newlib/src/configure Makefile
+	rm -rf $(NEWLIB_BUILD_DIR) $(NEWLIB_INSTALL_DIR)
 	mkdir -p $(NEWLIB_BUILD_DIR)
 	cd $(NEWLIB_BUILD_DIR) && sh $(abspath user/lib/newlib/configure.sh) \
 		$(NEWLIB_VENDOR_DIR) $(NEWLIB_TARGET) "$(NEWLIB_CFLAGS)"
@@ -830,11 +848,16 @@ rust-lint-host:
 
 rust-lint-target:
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-network-probe --features executable --lib -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
 		--target $(RUST_COMPONENT_TARGET) -p hunde-treiber-host --features service --lib -- -D warnings
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
 		--target $(RUST_COMPONENT_TARGET) -p hunde-io-host --features service --lib -- -D warnings
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
 		--target $(RUST_COMPONENT_TARGET) -p hunde-socket --features component --lib --bin socket-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-network --features component --lib --bin network-component -- -D warnings
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
 		--target $(RUST_COMPONENT_TARGET) -p hunde-pipe --features component --lib --bin pipe-component -- -D warnings
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) \
@@ -853,14 +876,17 @@ rust-lint-target:
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-virtio-blk --features component --lib --bin virtio-blk-component -- -D warnings
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-virtio-keyboard --features component --lib --bin virtio-keyboard-component -- -D warnings
 	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-sdhci --features component --lib --bin sdhci-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-virtio-net --features component --lib --bin virtio-net-component -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-network-nic-probe --features executable --lib -- -D warnings
+	cargo +$(RUST_TOOLCHAIN) clippy --manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --target $(RUST_COMPONENT_TARGET) -p hunde-net-dummy --features component --lib --bin net-dummy-component -- -D warnings
 
 rust-test:
 	cargo +$(RUST_TOOLCHAIN) test --manifest-path user/Cargo.toml --workspace --target-dir $(RUST_CARGO_DIR)
 
-rust-io: $(RUST_DEVFS_BINARY) $(RUST_EMBEDFS_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) $(RUST_PIPE_BINARY) $(RUST_SOCKET_BINARY) $(USER_BUILD_DIR)/hunde-io-host.bin
+rust-io: $(RUST_NETWORK_BINARY) $(RUST_DEVFS_BINARY) $(RUST_EMBEDFS_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) $(RUST_PIPE_BINARY) $(RUST_SOCKET_BINARY) $(USER_BUILD_DIR)/hunde-io-host.bin
 
 .PHONY: rust-drivers
-rust-drivers: $(USER_BUILD_DIR)/hunde-treiber-host.bin $(UART_RX_WUFF_BINARY) $(UART_TX_WUFF_BINARY) $(VIRTIO_BLK_WUFF_BINARY) $(VIRTIO_KEYBOARD_WUFF_BINARY) $(SDHCI_WUFF_BINARY)
+rust-drivers: $(VIRTIO_NET_WUFF_BINARY) $(NET_DUMMY_WUFF_BINARY) $(USER_BUILD_DIR)/hunde-treiber-host.bin $(UART_RX_WUFF_BINARY) $(UART_TX_WUFF_BINARY) $(VIRTIO_BLK_WUFF_BINARY) $(VIRTIO_KEYBOARD_WUFF_BINARY) $(SDHCI_WUFF_BINARY)
 
 $(SDHCI_WUFF_BINARY): $(RUST_IO_SOURCES) $(SYSROOT_WUFF_LIBC) user/drivers/sdhci/exports.map rust-toolchain.toml Makefile | check-wuff-linker
 	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) rustc \
@@ -917,6 +943,28 @@ $(UART_TX_WUFF_BINARY): $(RUST_IO_SOURCES) $(SYSROOT_WUFF_LIBC) user/drivers/uar
 	$(READELF) --dyn-syms -W $@ | awk '$$7 != "UND" && $$5 == "GLOBAL" { count++; if ($$8 != "hunde_driver_component_entry_v1") bad = 1 } END { exit bad || count != 1 }'
 	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad }'
 
+$(NET_DUMMY_WUFF_BINARY): $(RUST_IO_SOURCES) $(SYSROOT_WUFF_LIBC) user/drivers/net_dummy/exports.map rust-toolchain.toml Makefile | check-wuff-linker
+	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) rustc \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-net-dummy --features component --bin net-dummy-component -- \
+		-C linker=$(WUFF_LD) -C linker-flavor=ld \
+		-C link-args="-shared --soname net_dummy.wuff.1 --hash-style=sysv -z defs -z now -z relro -z text --version-script=$(abspath user/drivers/net_dummy/exports.map) -u hunde_driver_component_entry_v1 -L$(abspath $(SYSROOT_LIB_DIR)) -l:libc.wuff.1"
+	cp $(RUST_RELEASE_DIR)/net-dummy-component $@
+	test "$$($(READELF) -dW $@ | awk '/\(NEEDED\)/ { print $$5 }')" = '[libc.wuff.1]'
+	$(READELF) --dyn-syms -W $@ | awk '$$7 != "UND" && $$5 == "GLOBAL" { count++; if ($$8 != "hunde_driver_component_entry_v1") bad = 1 } END { exit bad || count != 1 }'
+	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad }'
+
+$(VIRTIO_NET_WUFF_BINARY): $(RUST_IO_SOURCES) $(SYSROOT_WUFF_LIBC) user/drivers/virtio_net/exports.map rust-toolchain.toml Makefile | check-wuff-linker
+	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) rustc \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-virtio-net --features component --bin virtio-net-component -- \
+		-C linker=$(WUFF_LD) -C linker-flavor=ld \
+		-C link-args="-shared --soname virtio_net.wuff.1 --hash-style=sysv -z defs -z now -z relro -z text --version-script=$(abspath user/drivers/virtio_net/exports.map) -u hunde_driver_component_entry_v1 -L$(abspath $(SYSROOT_LIB_DIR)) -l:libc.wuff.1"
+	cp $(RUST_RELEASE_DIR)/virtio-net-component $@
+	test "$$($(READELF) -dW $@ | awk '/\(NEEDED\)/ { print $$5 }')" = '[libc.wuff.1]'
+	$(READELF) --dyn-syms -W $@ | awk '$$7 != "UND" && $$5 == "GLOBAL" { count++; if ($$8 != "hunde_driver_component_entry_v1") bad = 1 } END { exit bad || count != 1 }'
+	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad }'
+
 $(RUST_DRIVER_HOST_ARCHIVE): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile
 	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) build \
 		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
@@ -926,6 +974,26 @@ $(RUST_IO_HOST_ARCHIVE): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile
 	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) build \
 		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
 		--target $(RUST_COMPONENT_TARGET) -p hunde-io-host --features service
+
+$(RUST_NETWORK_PROBE_ARCHIVE): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile
+	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) build \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-network-probe --features executable
+
+$(RUST_NETWORK_PROBE_BINARY): $(RUST_NETWORK_PROBE_ARCHIVE) $(SYSROOT_FILES)
+	mkdir -p `dirname $@`
+	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(RUST_NETWORK_PROBE_ARCHIVE) -L$(SYSROOT_LIB_DIR) \
+		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
+
+$(RUST_NIC_PROBE_ARCHIVE): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile
+	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) build \
+		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
+		--target $(RUST_COMPONENT_TARGET) -p hunde-network-nic-probe --features executable --lib
+
+$(RUST_NIC_PROBE_BINARY): $(RUST_NIC_PROBE_ARCHIVE) $(SYSROOT_FILES)
+	mkdir -p `dirname $@`
+	$(LD) $(USER_LDFLAGS) $(SYSROOT_CRT) $(RUST_NIC_PROBE_ARCHIVE) -L$(SYSROOT_LIB_DIR) \
+		-Wl,--start-group -lc -lhunde -lm -lgcc -Wl,--end-group -o $@
 
 $(RUST_DEVFS_BINARY): RUST_IO_COMPONENT_NAME = devfs
 $(RUST_DEVFS_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/devfs
@@ -947,6 +1015,10 @@ $(RUST_DEVFS_BINARY) $(RUST_EMBEDFS_BINARY): $(RUST_IO_SOURCES) $(SYSROOT_WUFF_L
 	$(READELF) -lW $@ | grep -q 'GNU_RELRO'
 	$(READELF) --dyn-syms -W $@ | awk '$$7 != "UND" && $$5 == "GLOBAL" { count++; if ($$8 != "$(RUST_IO_COMPONENT_ENTRY)") bad = 1 } END { exit bad || count != 1 }'
 	$(READELF) -rW $@ | awk -v allowed="$(WUFF_PROGRAM_RELOCATIONS)" '$$3 ~ /^R_/ { if (index(" " allowed " ", " " $$3 " ") == 0) { print; bad = 1 } } END { exit bad }'
+
+$(RUST_NETWORK_BINARY): RUST_IO_COMPONENT_NAME = network
+$(RUST_NETWORK_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/services/hunde-network
+$(RUST_NETWORK_BINARY): user/services/hunde-network/exports.map
 
 $(RUST_SOCKET_BINARY): RUST_IO_COMPONENT_NAME = socket
 $(RUST_SOCKET_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/socket
@@ -972,7 +1044,7 @@ $(RUST_FAT32_BINARY): RUST_IO_COMPONENT_DIRECTORY = user/drivers/fat32fs
 $(RUST_FAT32_BINARY): RUST_IO_COMPONENT_ENTRY = hunde_filesystem_component_entry_v1
 $(RUST_FAT32_BINARY): user/drivers/fat32fs/exports.map
 
-$(RUST_SOCKET_BINARY) $(RUST_PIPE_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile | check-wuff-linker
+$(RUST_NETWORK_BINARY) $(RUST_SOCKET_BINARY) $(RUST_PIPE_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY): $(RUST_IO_SOURCES) rust-toolchain.toml Makefile | check-wuff-linker
 	RUSTFLAGS="-C relocation-model=pic" cargo +$(RUST_TOOLCHAIN) rustc \
 		--manifest-path user/Cargo.toml --target-dir $(RUST_CARGO_DIR) --release \
 		--target $(RUST_COMPONENT_TARGET) -p hunde-$(RUST_IO_COMPONENT_NAME) --features component --bin $(RUST_IO_COMPONENT_NAME)-component -- \
@@ -1105,6 +1177,8 @@ kernel: hundelint user_binaries $(BIN)
 # Capture real kernel and userspace flags without compiling or launching QEMU.
 .PHONY: compile-commands compile-commands-capture
 compile-commands:
+	$(MAKE) -C build/aarch64/bash/build pathnames.h
+	$(MAKE) -C build/riscv64/bash/build pathnames.h
 	$(PYTHON) tools/compile_commands.py --make "$(MAKE)"
 
 compile-commands-capture:
@@ -1221,11 +1295,13 @@ $(SD_CARD_FAT32_IMG): $(PYTHON_ENV_STAMP) tools/populate_fat32_image.py $(SD_CAR
 	$(PYTHON) tools/populate_fat32_image.py $@ DOCS/NOTE.TXT $(SD_CARD_FAT32_NOTE_FILE)
 
 $(ROOTFS_STAMP): Makefile $(shell find $(EXT2_ROOT_DIR) -type f -print) $(ROOTFS_COMMAND_BINARIES) \
-        $(BASH_PORT_BINARY) $(SYSROOT_WUFF_LIBC)
+        $(BASH_PORT_BINARY) $(SYSROOT_WUFF_LIBC) $(RUST_NETWORK_PROBE_BINARY) $(RUST_NIC_PROBE_BINARY)
 	rm -rf $(ROOTFS_DIR)
 	mkdir -p $(ROOTFS_DIR)/usr/lib $(ROOTFS_DIR)/usr/local/bin $(ROOTFS_DIR)/var/log
 	cp -R $(EXT2_ROOT_DIR)/. $(ROOTFS_DIR)/
 	$(foreach binary,$(ROOTFS_COMMAND_BINARIES),cp $(binary) $(ROOTFS_DIR)/usr/local/bin/$(basename $(notdir $(binary)));)
+	cp $(RUST_NIC_PROBE_BINARY) $(ROOTFS_DIR)/usr/local/bin/network_nic_probe
+	cp $(RUST_NETWORK_PROBE_BINARY) $(ROOTFS_DIR)/usr/local/bin/network_probe
 	cp $(SYSROOT_WUFF_LIBC) $(ROOTFS_DIR)/usr/lib/libc.wuff.1
 	cp $(BASH_PORT_BINARY) $(ROOTFS_DIR)/usr/local/bin/bash
 	touch $@
@@ -1284,6 +1360,8 @@ $(KERNEL_BUILD_DIR)/%.o: %.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
+$(ARCH_ASM_OBJECTS): $(wildcard arch/$(ARCH)/*.inc)
+
 $(KERNEL_BUILD_DIR)/%.o: %.S
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
@@ -1324,7 +1402,7 @@ $(MILKV_DUO_BRINGUP_BUILD_DIR)/%.o: %.s
 	mkdir -p `dirname $@`
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(EMBEDDED_FS): $(RUST_DEVFS_BINARY) $(RUST_EMBEDFS_BINARY) $(SYSROOT_WUFF_LIBC) config/bootstrap.fstab $(PYTHON_ENV_STAMP) $(USER_BINARIES) $(RUST_SOCKET_BINARY) $(UART_RX_WUFF_BINARY) $(UART_TX_WUFF_BINARY) $(VIRTIO_BLK_WUFF_BINARY) $(VIRTIO_KEYBOARD_WUFF_BINARY) $(SDHCI_WUFF_BINARY) $(RUST_PIPE_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) tools/build_embedded_fs.py config/io-host.conf
+$(EMBEDDED_FS): $(VIRTIO_NET_WUFF_BINARY) $(NET_DUMMY_WUFF_BINARY) $(RUST_NETWORK_BINARY) $(RUST_DEVFS_BINARY) $(RUST_EMBEDFS_BINARY) $(SYSROOT_WUFF_LIBC) config/bootstrap.fstab $(PYTHON_ENV_STAMP) $(USER_BINARIES) $(RUST_SOCKET_BINARY) $(UART_RX_WUFF_BINARY) $(UART_TX_WUFF_BINARY) $(VIRTIO_BLK_WUFF_BINARY) $(VIRTIO_KEYBOARD_WUFF_BINARY) $(SDHCI_WUFF_BINARY) $(RUST_PIPE_BINARY) $(RUST_MEMFS_BINARY) $(RUST_PROCFS_BINARY) $(RUST_SYSINFOFS_BINARY) $(RUST_EXT2_BINARY) $(RUST_FAT32_BINARY) tools/build_embedded_fs.py config/io-host.conf
 	$(PYTHON) tools/build_embedded_fs.py $@ $(EMBEDDED_FS_INPUTS)
 
 $(KERNEL_BUILD_DIR)/./kernel/bin/embedded_fs.o: kernel/bin/embedded_fs.S $(EMBEDDED_FS)
@@ -1743,21 +1821,13 @@ qemu-riscv64-trace-run: $(ELF) $(EXT2_IMG) $(BOOT_CONFIG_EXT2_IMG) $(DISK_IMG) $
 	mkdir -p `dirname $(KERNEL_TRACE_LOG)`
 	: > $(KERNEL_TRACE_LOG)
 	qemu-system-riscv64 -machine virt -cpu rv64,zawrs=true -smp 4 -m 1G -bios default \
+		$(QEMU_NET_ARGS) \
 		-kernel $(ELF) \
 		-drive if=none,file=$(EXT2_IMG),format=raw,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
 		-drive if=none,file=$(BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
 		-device virtio-blk-device,drive=hd1 \
-		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
-		-device virtio-blk-device,drive=hd2 \
-		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
-		-device virtio-blk-device,drive=sd0 \
-		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
-		-device virtio-blk-device,drive=channelio0 \
-		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
-		-device virtio-blk-device,drive=channelio1 \
-		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
-		-device virtio-blk-device,drive=hostedext2 \
+		$(QEMU_TEST_BLOCK_ARGS) \
 		-device virtio-keyboard-device \
 		-display none -monitor none -no-reboot \
 		-chardev stdio,id=console,signal=off -serial chardev:console \
@@ -2055,6 +2125,7 @@ qemu-virt-hvf-trace:
 	mkdir -p $(BUILD_ROOT)
 	: > $(KERNEL_TRACE_LOG)
 	qemu-system-aarch64 \
+		$(QEMU_NET_ARGS) \
 		-M virt,gic-version=3,accel=hvf \
 		-smp cpus=4 \
 		-cpu host \
@@ -2066,16 +2137,7 @@ qemu-virt-hvf-trace:
 		-device virtio-blk-device,drive=hd0 \
 		-drive if=none,file=$(HVF_BOOT_CONFIG_EXT2_IMG),format=raw,id=hd1 \
 		-device virtio-blk-device,drive=hd1 \
-		-drive if=none,file=$(DISK_IMG),format=raw,id=hd2 \
-		-device virtio-blk-device,drive=hd2 \
-		-drive if=none,file=$(SD_CARD_FAT32_IMG),format=raw,id=sd0 \
-		-device virtio-blk-device,drive=sd0 \
-		-drive if=none,file=$(CHANNELIO_DISK_IMG),format=raw,id=channelio0 \
-		-device virtio-blk-device,drive=channelio0 \
-		-drive if=none,file=$(CHANNELIO_EXT2_IMG),format=raw,id=channelio1 \
-		-device virtio-blk-device,drive=channelio1 \
-		-drive if=none,file=$(HOSTED_EXT2_IMG),format=raw,id=hostedext2 \
-		-device virtio-blk-device,drive=hostedext2 \
+		$(QEMU_TEST_BLOCK_ARGS) \
 		-device virtio-keyboard-device \
 		-kernel $(HVF_TRACE_ELF) \
 		-display none \

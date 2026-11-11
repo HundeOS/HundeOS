@@ -27,6 +27,9 @@ pub(crate) fn image_ready(path: &str) -> ReadinessMessage {
 }
 
 impl<Driver: IoComponent> IoComponent for ConfiguredComponent<Driver> {
+    fn advance(&mut self, now_usec: u64) -> hunde::component::Schedule {
+        self.driver.advance(now_usec)
+    }
     fn execute(&mut self, request: Request<'_>) -> Result<Option<Reply>, IoError> {
         self.driver.execute(request)
     }

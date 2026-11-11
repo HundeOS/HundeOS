@@ -61,3 +61,13 @@ HundeStatusResult hunde_rust_terminal_interrupt(uint64_t pid)
     ProcessSignalResult status = kill_process(pid, PROCESS_SIGNAL_INTERRUPT);
     return status == PROCESS_SIGNAL_OK ? HundeStatusResult__success() : RustNative__error(status);
 }
+
+HundeStatusResult hunde_rust_terminal_interrupt_group(uint64_t group)
+{
+    if (group == 0 || group > INT64_MAX)
+    {
+        return RustNative__error(PROCESS_SIGNAL_UNSUPPORTED);
+    }
+    ProcessSignalResult status = terminal_interrupt_group(group);
+    return status == PROCESS_SIGNAL_OK ? HundeStatusResult__success() : RustNative__error(status);
+}

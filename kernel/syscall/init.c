@@ -58,6 +58,12 @@ Result(RegisterResult) Init__syscalls(SyscallDispatcherPtr self)
                 REGISTER(self, SYSCALL_PANIC, &Panic__handler);
                 REGISTER(self, SYSCALL_SLEEP, &ProcessSleep__handler);
                 REGISTER(self, SYSCALL_PROCESS_IDLE_WAIT, &ProcessIdleWait__handler);
+                REGISTER(self, SYSCALL_THREAD_CREATE, &ThreadCreate__handler);
+                REGISTER(self, SYSCALL_THREAD_EXIT, &ThreadExit__handler);
+                REGISTER(self, SYSCALL_THREAD_JOIN, &ThreadJoin__handler);
+                REGISTER(self, SYSCALL_THREAD_LOCAL_IMAGE, &ThreadLocalImage__handler);
+                REGISTER(self, SYSCALL_THREAD_WAIT, &ThreadWait__handler);
+                REGISTER(self, SYSCALL_THREAD_WAKE, &ThreadWake__handler);
                 REGISTER(self, SYSCALL_PROCESS_TIMES, &ProcessTimes__handler);
                 REGISTER(self, SYSCALL_PROCESS_IDENTITY, &ProcessIdentity__handler);
                 REGISTER(self, SYSCALL_PROCESS_FORK, &ProcessFork__handler);

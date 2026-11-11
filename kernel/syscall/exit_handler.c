@@ -5,8 +5,9 @@
 
 static BString process_not_found = bstr("Process not found");
 
-Result(SystemCallResult) Exit__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2,
-                                       Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    Exit__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                  Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     ReturnCode exit_code = (ReturnCode)arg1;
     match_optional(
@@ -15,9 +16,17 @@ Result(SystemCallResult) Exit__handler(KernelPtr kernel, OptionalPtr(ProcessPtr)
         {
             __d_printf(SYSCALL, "Exiting process %i %s", process->pid, cstr(process->name));
 
-            Process__dispose_owned_kernel_resources(process);
-            Scheduler__exit(kernel->scheduler, process, exit_code);
-            return Success(SystemCallResult, SYSCALL_OK);
+            match_result(
+                Scheduler__exit(kernel->scheduler, process, exit_code),
+                success(exited_pid)
+                {
+                    return Success(SystemCallResult, SYSCALL_OK);
+                },
+                error(code, message)
+                {
+                    return Error(SystemCallResult, message, code);
+                }
+            );
         },
         none()
         {

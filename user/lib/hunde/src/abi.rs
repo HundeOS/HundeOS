@@ -83,6 +83,24 @@ pub struct StatusResult {
     pub error: AbiError,
 }
 
+#[cfg(feature = "alloc")]
+#[repr(C)]
+pub(crate) struct NativeValue {
+    pub(crate) status: StatusResult,
+    pub(crate) value: u64,
+}
+
+#[cfg(feature = "alloc")]
+impl NativeValue {
+    pub(crate) fn optional(self) -> Result<Option<u64>, IoError> {
+        if self.status.kind == PENDING {
+            return Ok(None);
+        }
+        self.status.into_result()?;
+        Ok(Some(self.value))
+    }
+}
+
 impl StatusResult {
     pub fn from_result(result: Result<(), IoError>) -> Self {
         match result {
@@ -271,6 +289,11 @@ impl RawRequest {
             Operation::SetForegroundProcess(pid) => {
                 raw.offset = pid.0;
                 IO_REQUEST_SET_FOREGROUND_PROCESS
+            }
+            Operation::GetForegroundGroup => IO_REQUEST_GET_FOREGROUND_GROUP,
+            Operation::SetForegroundGroup(group) => {
+                raw.offset = group.0;
+                IO_REQUEST_SET_FOREGROUND_GROUP
             }
             Operation::GetTerminalAttributes(attributes) => {
                 raw.read_data = core::ptr::from_mut(attributes).cast();
@@ -510,6 +533,22 @@ pub struct Component {
     pub execute: Option<unsafe extern "C" fn(*mut c_void, *const RawRequest) -> Completion>,
     pub disconnect: Option<unsafe extern "C" fn(*mut c_void, u64) -> StatusResult>,
     pub dispose: Option<unsafe extern "C" fn(*mut c_void) -> StatusResult>,
+    pub advance: Option<unsafe extern "C" fn(*mut c_void, u64) -> RawSchedule>,
+}
+
+#[repr(C)]
+pub struct RawSchedule {
+    pub worked: u64,
+    pub deadline_usec: u64,
+}
+
+impl From<crate::component::Schedule> for RawSchedule {
+    fn from(schedule: crate::component::Schedule) -> Self {
+        Self {
+            worked: u64::from(schedule.worked()),
+            deadline_usec: schedule.deadline_usec().unwrap_or(u64::MAX),
+        }
+    }
 }
 
 #[repr(C)]
@@ -540,6 +579,7 @@ impl LoadResult {
                 execute: None,
                 disconnect: None,
                 dispose: None,
+                advance: None,
             },
             error: AbiError::new(code, b"Cannot initialize I/O component"),
         }
@@ -554,6 +594,7 @@ impl LoadResult {
             || self.component.execute.is_none()
             || self.component.disconnect.is_none()
             || self.component.dispose.is_none()
+            || self.component.advance.is_none()
         {
             return Err(IoError(-1));
         }
@@ -689,6 +730,7 @@ pub(crate) mod host {
         ) -> Completion;
         pub(crate) fn hunde_rust_terminal_close(handle: i64) -> StatusResult;
         pub(crate) fn hunde_rust_terminal_interrupt(pid: u64) -> StatusResult;
+        pub(crate) fn hunde_rust_terminal_interrupt_group(group: u64) -> StatusResult;
         pub(crate) fn hunde_rust_block_open(
             storage: *mut c_void,
             path: ByteSpan,
@@ -759,6 +801,7 @@ pub(crate) mod host {
         pub(crate) fn hunde_rust_channel_prepare_wait();
         pub(crate) fn hunde_rust_channel_wait();
         pub(crate) fn hunde_rust_channel_wait_ticks(ticks: u64);
+        pub(crate) fn hunde_rust_monotonic_usec() -> u64;
     }
 }
 
@@ -774,8 +817,9 @@ const _: () = {
     assert!(size_of::<RawRequest>() == 104);
     assert!(offset_of!(RawRequest, read_data) == 48);
     assert!(size_of::<Completion>() == 1048);
-    assert!(size_of::<Component>() == 40);
-    assert!(size_of::<LoadResult>() == 72);
+    assert!(size_of::<RawSchedule>() == 16);
+    assert!(size_of::<Component>() == 48);
+    assert!(size_of::<LoadResult>() == 80);
     assert!(size_of::<LifecycleHostOperations>() == 32);
     assert!(size_of::<LifecycleDescriptor>() == 32);
     assert!(size_of::<LifecycleLoadResult>() == 64);

@@ -28,16 +28,24 @@ fn main() {
             }
             assert_eq!(
                 fields.len(),
-                if bootstrap { 4 } else { 3 },
+                if bootstrap || fields[0] == "virtio-driver" {
+                    4
+                } else {
+                    3
+                },
                 "Invalid bootstrap component manifest entry"
             );
             let kind = match (bootstrap, fields[0]) {
                 (false, "service") | (true, "device") => "Service",
                 (false, "filesystem") => "Filesystem",
-                (false, "driver") => "Driver",
+                (false, "driver" | "polled-driver" | "virtio-driver") => "Driver",
                 _ => panic!("Unknown bootstrap component manifest entry"),
             };
-            let path = fields[2];
+            let path = fields[if !bootstrap && fields[0] == "virtio-driver" {
+                3
+            } else {
+                2
+            }];
             let name = path
                 .strip_prefix("/sbin/components/")
                 .expect("Component image outside bootstrap directory");
@@ -66,6 +74,7 @@ fn main() {
         "common/ipc/io_protocol.h",
         "common/ipc/buffer.h",
         "common/ipc/interrupt_protocol.h",
+        "common/ipc/packet_protocol.h",
         "common/hardware/boot_info.h",
         "common_includes/hunde/io_component.h",
         "common_includes/hunde/driver_component.h",

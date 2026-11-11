@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use alloc::task::Wake;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::ffi::c_void;
 use core::future::Future;
 use core::pin::Pin;
@@ -18,6 +18,7 @@ pub trait FiberParker {
 
 pub struct Scheduler {
     storage: crate::native::Storage,
+    deadline: Cell<Option<u64>>,
 }
 
 #[repr(C)]
@@ -130,7 +131,10 @@ impl Scheduler {
             crate::abi::host::hunde_rust_scheduler_layout()
         })?;
         unsafe { crate::abi::host::hunde_rust_scheduler_init(storage.as_ptr()) };
-        Ok(Self { storage })
+        Ok(Self {
+            storage,
+            deadline: Cell::new(None),
+        })
     }
 
     pub fn run<Entry: FnOnce(&mut SchedulerParker<'_>) -> Result<(), IoError>>(
@@ -160,12 +164,21 @@ impl Scheduler {
             .into_result()?;
         unsafe { crate::abi::host::hunde_rust_channel_prepare_wait() };
         while unsafe { crate::abi::host::hunde_rust_scheduler_live(self.storage.as_ptr()) } != 0 {
+            self.deadline.set(None);
             self.check_progress(unsafe {
                 crate::abi::host::hunde_rust_scheduler_run(self.storage.as_ptr())
             })?;
             if unsafe { crate::abi::host::hunde_rust_scheduler_waiting(self.storage.as_ptr()) } != 0
             {
-                unsafe { crate::abi::host::hunde_rust_channel_wait() };
+                match self.deadline.get() {
+                    Some(deadline) => unsafe {
+                        crate::abi::host::hunde_rust_channel_wait_ticks(deadline_ticks(
+                            deadline,
+                            crate::runtime::monotonic_usec(),
+                        ))
+                    },
+                    None => unsafe { crate::abi::host::hunde_rust_channel_wait() },
+                }
                 self.check_progress(unsafe {
                     crate::abi::host::hunde_rust_scheduler_wake(self.storage.as_ptr())
                 })?;
@@ -185,9 +198,23 @@ impl Scheduler {
     }
 }
 
+#[derive(Clone)]
 pub struct SchedulerParker<'a>(&'a Scheduler);
 
+fn earliest_deadline(current: Option<u64>, candidate: u64) -> Option<u64> {
+    Some(current.map_or(candidate, |current| current.min(candidate)))
+}
+
+fn deadline_ticks(deadline: u64, now: u64) -> u64 {
+    deadline.saturating_sub(now).div_ceil(1000).max(1)
+}
+
 impl SchedulerParker<'_> {
+    pub fn wake_at(&self, deadline_usec: u64) {
+        self.0
+            .deadline
+            .set(earliest_deadline(self.0.deadline.get(), deadline_usec));
+    }
     pub fn notify(&mut self) -> Result<(), IoError> {
         self.0.check_progress(unsafe {
             crate::abi::host::hunde_rust_scheduler_wake(self.0.storage.as_ptr())
@@ -291,6 +318,15 @@ pub fn block_on<F: Future>(future: F, parker: &mut impl FiberParker) -> Result<F
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deadlines_choose_the_earliest_and_round_waits_up_to_milliseconds() {
+        assert_eq!(super::earliest_deadline(None, 7000), Some(7000));
+        assert_eq!(super::earliest_deadline(Some(7000), 3000), Some(3000));
+        assert_eq!(super::earliest_deadline(Some(3000), 7000), Some(3000));
+        assert_eq!(super::deadline_ticks(3001, 1000), 3);
+        assert_eq!(super::deadline_ticks(3000, 3000), 1);
+        assert_eq!(super::deadline_ticks(2000, 3000), 1);
+    }
     use super::*;
     use core::cell::Cell;
     use core::future::poll_fn;

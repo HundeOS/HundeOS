@@ -8,8 +8,9 @@ static BString invalid_system_info_request = bstr("Invalid system information re
 static BString system_info_permission_denied = bstr("System information permission denied");
 static BString system_info_unavailable = bstr("System information unavailable");
 
-Result(SystemCallResult) SystemInfo__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1,
-                                             Anything arg2, Anything arg3, Anything arg4, Anything arg5)
+Result(SystemCallResult)
+    SystemInfo__handler(KernelPtr kernel, OptionalPtr(ProcessPtr) proc, Anything arg1, Anything arg2, Anything arg3,
+                        Anything arg4, Anything arg5, OptionalPtr(ThreadPtr) caller_thread)
 {
     SystemInfoOperation operation = (SystemInfoOperation)arg1;
     if (operation != SYSTEM_INFO_READ_SETTINGS && operation != SYSTEM_INFO_READ_KERNEL_TRACE)

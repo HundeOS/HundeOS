@@ -14,6 +14,11 @@ typedef struct Stack
 typedef Stack * StackPtr;
 typedef const Stack * ConstStackPtr;
 
+static inline Stack Stack__new_from_user_allocation(UserAddress base, size_t size)
+{
+    return (Stack){.base = base, .top = UserAddress__relative(&base, size), .size = size};
+}
+
 Stack Stack__new(size_t size);
 void Stack__map(KernelPtr kernel, StackPtr self, ProcessPageTablePtr page_table);
 

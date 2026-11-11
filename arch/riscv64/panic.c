@@ -29,7 +29,7 @@ void Kernel__halt(void)
     }
 }
 
-void Kernel__dump_state(ProcessContextPtr context)
+void Kernel__dump_state(ThreadContextPtr context)
 {
     uint64_t satp;
     __asm__ volatile("csrr %0, satp" : "=r"(satp));
@@ -52,7 +52,7 @@ void Kernel__dump_state(ProcessContextPtr context)
     }
 }
 
-void Kernel__dump_context(ProcessContextPtr context)
+void Kernel__dump_context(ThreadContextPtr context)
 {
     __d_printf(FAULT, "Context: %p\n", context);
     __d_printf(FAULT, "PC: %p\n", context->sepc);

@@ -3,6 +3,7 @@
 #include "../../../kernel/exec/load.h"
 #include "../../../kernel/syscall/exec_handler.h"
 #include "../../../kernel/bin/embedded_binaries.h"
+#include "../stubs/thread_context_layout.h"
 #include "process.h"
 OptionalDef(Queue);
 
@@ -33,7 +34,7 @@ static FakeExecService FakeExecService__new(KernelPtr kernel)
     ProcessPtr io = dummy_process(101, 0, PROC_STATE_NEW);
     ProcessPtr puffer = dummy_process(102, 0, PROC_STATE_NEW);
     puffer->name = bstr("/sbin/services/hunde-puffer");
-    puffer->process_class = PROCESS_CLASS_SERVICE;
+    puffer->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(puffer);
     Scheduler__schedule(kernel->scheduler, puffer);
     match_result(
@@ -41,7 +42,7 @@ static FakeExecService FakeExecService__new(KernelPtr kernel)
         success_do_nothing(),
         error_test_fail()
     );
-    io->process_class = PROCESS_CLASS_SERVICE;
+    io->scheduling.process_class = PROCESS_CLASS_SERVICE;
     Process__set_hund_identity(io);
     Scheduler__schedule(kernel->scheduler, io);
     match_result(Queues__listen(&kernel->scheduler->queues, io, &bstr(IO_SYSTEM_SERVICE)),
@@ -89,7 +90,7 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
 {
     FakeExecService__drain(self, kernel);
     ExecLoadPtr load;
-    match_optional(parent->exec_load,
+    match_optional(parent->image.exec_load,
         some(value)
         {
             load = value;
@@ -231,7 +232,15 @@ static void FakeExecService__poll(FakeExecServicePtr self, KernelPtr kernel, Pro
 static Result(SystemCallResult)
     FakeExecService__spawn(FakeExecServicePtr self, KernelPtr kernel, OptionalPtr(ProcessPtr) process, Anything request)
 {
-    Result(SystemCallResult) result = ExecRequest__handler(kernel, process, request, 0, 0, 0, 0);
+    Optional(ThreadPtr) caller_thread = None(ThreadPtr);
+    match_optional(*process,
+        some(caller)
+        {
+            caller_thread = Some(ThreadPtr, &caller->thread);
+        },
+        none_do_nothing()
+    );
+    Result(SystemCallResult) result = ExecRequest__handler(kernel, process, request, 0, 0, 0, 0, &caller_thread);
     match_result(
         result,
         success(value)
@@ -251,7 +260,7 @@ static Result(SystemCallResult)
         *process,
         some(parent)
         {
-            deferred = !is_nothing(parent->exec_load) &&
+            deferred = !is_nothing(parent->image.exec_load) &&
                        Process__has_parked_operation(parent, PARK_WAIT_EXEC_LOAD, &None(OperationKey));
         },
         none_do_nothing()
@@ -266,48 +275,19 @@ static Result(SystemCallResult)
             *process,
             some(parent)
             {
-                if (!is_nothing(parent->exec_load))
+                if (!is_nothing(parent->image.exec_load))
                 {
                     FakeExecService__poll(self, kernel, parent);
-                    Scheduler__preempt(kernel->scheduler, 0, &None(ProcessContextPtr));
+                    Scheduler__preempt(kernel->scheduler, 0, &None(ThreadContextPtr));
                     continue;
                 }
                 FakeExecService__drain(self, kernel);
-                match_result(
-                    deferred_syscall_result(),
-                    success(value)
-                    {
-                        if ((int64_t)value < 0)
-                        {
-                            return Error(SystemCallResult, bstr("Deferred executable load failed"), (int64_t)value);
-                        }
-                        return Success(SystemCallResult, value);
-                    },
-                    error(code, message)
-                    {
-                        ProcessTable processes = Scheduler__process_snapshot(kernel->scheduler);
-                        for_each_fa(
-                            ProcessTable,
-                            processes,
-                            index,
-                            child,
-                            {
-                                match_optional(
-                                    child->parent,
-                                    some(child_parent)
-                                    {
-                                        if (child_parent == parent)
-                                        {
-                                            return Success(SystemCallResult, child->pid);
-                                        }
-                                    },
-                                    none_do_nothing()
-                                );
-                            }
-                        );
-                        return Error(SystemCallResult, message, code);
-                    }
-                );
+                SystemCallResult value = Thread__required_context(&parent->thread)->x[0];
+                if ((int64_t)value < 0)
+                {
+                    return Error(SystemCallResult, bstr("Deferred executable load failed"), (int64_t)value);
+                }
+                return Success(SystemCallResult, value);
             },
             none_test_fail()
         );

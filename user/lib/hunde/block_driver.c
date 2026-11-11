@@ -188,11 +188,6 @@ int64_t hunde_block_buffer_device_address(ConstHundeBlockBufferPtr buffer, uint6
     return BufferMemory__operation(MEM_BUFFER_DEVICE_ADDRESS, buffer->id, offset, length, buffer->direction);
 }
 
-uint64_t hunde_block_driver_monotonic_usec(void)
-{
-    return IpcPlatform__monotonic_usec();
-}
-
 void hunde_block_driver_record(uint64_t blocks, uint64_t device_usec, uint32_t succeeded)
 {
     Optional(BlockDeviceTiming) timing = None(BlockDeviceTiming);

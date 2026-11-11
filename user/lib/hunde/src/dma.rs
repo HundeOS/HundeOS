@@ -58,13 +58,13 @@ impl Area {
 
     pub fn write(&mut self, offset: usize, source: &[u8]) -> Result<(), IoError> {
         let target = self.range(offset, source.len())?;
-        unsafe { core::ptr::copy_nonoverlapping(source.as_ptr(), target, source.len()) };
+        unsafe { crate::native::copy_to_mapped(target, source) };
         Ok(())
     }
 
     pub fn read(&self, offset: usize, target: &mut [u8]) -> Result<(), IoError> {
         let source = self.range(offset, target.len())?;
-        unsafe { core::ptr::copy_nonoverlapping(source, target.as_mut_ptr(), target.len()) };
+        unsafe { crate::native::copy_from_mapped(source, target) };
         Ok(())
     }
 

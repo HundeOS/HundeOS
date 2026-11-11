@@ -14,6 +14,12 @@ RiscVProcess__switch_context:
     csrw satp, t0
     sfence.vma zero, zero
     fence.i
+    addi sp, sp, -16
+    sd a0, 0(sp)
+    mv a0, a2
+    call Process__address_space_switched
+    ld a0, 0(sp)
+    addi sp, sp, 16
 
     la t0, __boot_stack_virtual_start
     sub t1, sp, t0

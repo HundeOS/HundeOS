@@ -40,7 +40,7 @@ Result(ServiceCode) KernelDeviceRegistry__map_process(KernelDeviceRegistryPtr se
             return Error(ServiceCode, message, code);
         }
     );
-    PageTable__map_shared(&process->page_table, process->kernel, self->mapping, DEVICE_REGISTRY_SIZE);
+    PageTable__map_shared(&process->address_space.page_table, process->kernel, self->mapping, DEVICE_REGISTRY_SIZE);
     return Success(ServiceCode, SERVICE_OK);
 }
 

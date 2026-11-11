@@ -45,6 +45,9 @@ pub struct SessionId(pub u64);
 pub struct ProcessId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessGroupId(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Handle(pub i64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,6 +197,8 @@ pub enum Operation<'a> {
     GetTerminalAttributes(&'a mut crate::terminal::Attributes),
     SetTerminalAttributes(crate::terminal::Attributes),
     SetForegroundProcess(ProcessId),
+    GetForegroundGroup,
+    SetForegroundGroup(ProcessGroupId),
     Open(&'a [u8], u64),
     Accept,
     Read(&'a mut [u8]),
@@ -270,6 +275,10 @@ impl<'a> Request<'a> {
         let operation = match raw.operation {
             crate::protocol::IO_REQUEST_SET_FOREGROUND_PROCESS => {
                 Operation::SetForegroundProcess(ProcessId(raw.offset))
+            }
+            crate::protocol::IO_REQUEST_GET_FOREGROUND_GROUP => Operation::GetForegroundGroup,
+            crate::protocol::IO_REQUEST_SET_FOREGROUND_GROUP => {
+                Operation::SetForegroundGroup(ProcessGroupId(raw.offset))
             }
             crate::protocol::IO_REQUEST_GET_TERMINAL_ATTRIBUTES => {
                 if count != size_of::<crate::terminal::Attributes>()

@@ -4,7 +4,9 @@
 Result(IORequest) IORequest__new_rust(ConstHundeIORequestV6Ptr input)
 {
     if (input->operation == IO_REQUEST_GET_TERMINAL_ATTRIBUTES ||
-        input->operation == IO_REQUEST_SET_TERMINAL_ATTRIBUTES || input->operation == IO_REQUEST_SET_FOREGROUND_PROCESS)
+        input->operation == IO_REQUEST_SET_TERMINAL_ATTRIBUTES ||
+        input->operation == IO_REQUEST_SET_FOREGROUND_PROCESS || input->operation == IO_REQUEST_GET_FOREGROUND_GROUP ||
+        input->operation == IO_REQUEST_SET_FOREGROUND_GROUP)
     {
         return Error(IORequest, bstr("Filesystem does not provide terminal controls"), IO_OPERATION_NOT_SUPPORTED);
     }

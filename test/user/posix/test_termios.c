@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <sys/types.h>
 #include <string.h>
 #include "../../../user/lib/newlib/include/sys/ioctl.h"
 #include "../../../user/lib/newlib/include/termios.h"
@@ -11,6 +12,7 @@
 static IOTerminalAttributes attributes;
 static IOStatus next_status;
 static IOTerminalAttributes written_attributes;
+static int64_t foreground_group;
 
 Optional(BString) PosixIO__terminal_path(int descriptor)
 {
@@ -42,6 +44,22 @@ Result(IOStatus) IO__set_terminal_attributes(IOHandle handle, IOTerminalAttribut
                                 : Error(IOStatus, bstr("terminal write failed"), next_status);
 }
 
+Result(ProcessGroupID) IO__get_terminal_foreground_group(IOHandle handle)
+{
+    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 4, handle);
+    IOStatus status = foreground_group == 0 ? IO_OPERATION_NOT_SUPPORTED : next_status;
+    return status == IO_OK ? Success(ProcessGroupID, (ProcessGroupID)foreground_group)
+                           : Error(ProcessGroupID, bstr("terminal group read failed"), status);
+}
+
+Result(IOStatus) IO__set_terminal_foreground_group(IOHandle handle, ProcessGroupID group)
+{
+    TEST_ASSERT_EQUAL_INT64(IO_SESSION_HANDLE_BASE + 4, handle);
+    foreground_group = (int64_t)group;
+    return next_status == IO_OK ? Success(IOStatus, IO_OK)
+                                : Error(IOStatus, bstr("terminal group write failed"), next_status);
+}
+
 #include "../../../user/lib/newlib/termios.c"
 
 void setUp(void)
@@ -50,6 +68,7 @@ void setUp(void)
     attributes = IOTerminalAttributes__default();
     next_status = IO_OK;
     written_attributes = (IOTerminalAttributes){0};
+    foreground_group = 12;
 }
 
 void tearDown(void)
@@ -97,6 +116,28 @@ void test_termios_rejects_invalid_descriptors_arguments_and_actions(void)
     TEST_ASSERT_EQUAL_INT(EINVAL, errno);
     TEST_ASSERT_EQUAL_INT(-1, tcsetattr(7, TCSAFLUSH, &value));
     TEST_ASSERT_EQUAL_INT(EINVAL, errno);
+}
+
+void test_terminal_foreground_group_uses_the_authenticated_terminal_handle(void)
+{
+    TEST_ASSERT_EQUAL_INT64(12, tcgetpgrp(7));
+    TEST_ASSERT_EQUAL_INT(0, tcsetpgrp(7, 42));
+    TEST_ASSERT_EQUAL_INT64(42, tcgetpgrp(7));
+    TEST_ASSERT_EQUAL_INT(-1, tcsetpgrp(7, 0));
+    TEST_ASSERT_EQUAL_INT(EINVAL, errno);
+    TEST_ASSERT_EQUAL_INT(-1, tcgetpgrp(8));
+    TEST_ASSERT_EQUAL_INT(ENOTTY, errno);
+    next_status = IO_OPERATION_NOT_SUPPORTED;
+    TEST_ASSERT_EQUAL_INT(-1, tcgetpgrp(7));
+    TEST_ASSERT_EQUAL_INT(ENOTTY, errno);
+}
+
+void test_foreground_group_query_does_not_claim_an_unowned_terminal(void)
+{
+    foreground_group = 0;
+    TEST_ASSERT_EQUAL_INT(-1, tcgetpgrp(7));
+    TEST_ASSERT_EQUAL_INT(ENOTTY, errno);
+    TEST_ASSERT_EQUAL_INT64(0, foreground_group);
 }
 
 void test_tcgetwinsize_reports_unsupported_without_changing_the_size(void)

@@ -98,6 +98,12 @@ def generate(root):
         ("UartKind", "u64", "common/hardware/boot_info.h"),
         ("SdHostKind", "u64", "common/hardware/boot_info.h"),
         ("BufferDirection", "u32", "common/ipc/buffer.h"),
+        ("BufferOperation", "u32", "common/ipc/buffer.h"),
+        ("BufferStatus", "i32", "common/ipc/buffer.h"),
+        ("PacketProtocolVersion", "u32", "common/ipc/packet_protocol.h"),
+        ("PacketProtocolOperation", "u32", "common/ipc/packet_protocol.h"),
+        ("PacketProtocolStatus", "i32", "common/ipc/packet_protocol.h"),
+        ("PacketProtocolLimit", "u64", "common/ipc/packet_protocol.h"),
     ):
         source = "#include " + json.dumps(str(root / header)) + "\n"
         for name, value in compile_enum(root, enum_name, rust_type, source):

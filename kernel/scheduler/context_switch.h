@@ -5,8 +5,8 @@
 
 typedef struct ContextSwitch
 {
-    ProcessPtr new_proc;
-    Optional(ProcessPtr) old_proc;
+    ThreadPtr new_thread;
+    Optional(ThreadPtr) old_thread;
 } ContextSwitch;
 
 typedef const ContextSwitch * ConstContextSwitchPtr;
@@ -14,6 +14,6 @@ typedef const ContextSwitch * ConstContextSwitchPtr;
 OptionalDef(ContextSwitch);
 
 void ContextSwitch__switch(ConstContextSwitchPtr self);
-ContextSwitch ContextSwitch__new(ProcessPtr new_proc, OptionalPtr(ProcessPtr) old_proc);
+ContextSwitch ContextSwitch__new(ThreadPtr new_thread, OptionalPtr(ThreadPtr) old_thread);
 
 #endif

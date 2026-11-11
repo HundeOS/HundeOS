@@ -10,6 +10,7 @@
 #include "../stubs/cpu.h"
 #include "../stubs/kalloc.h"
 #include "../stubs/process.h"
+#include "../stubs/thread_context_layout.h"
 #include "../../../kernel/types/types.h"
 
 static KernelPtr kernel;
@@ -22,7 +23,7 @@ static OriginatingContext context;
 
 static const CPUID cpu = 0;
 
-static const Optional(ProcessContextPtr) no_process_context = None(ProcessContextPtr);
+static const Optional(ThreadContextPtr) no_thread_context = None(ThreadContextPtr);
 
 static size_t test_hello_world_elf_size(void)
 {
@@ -59,17 +60,36 @@ void setUp(void)
 
     exec_request = test_spawn_request(&exec_path);
     Optional(ProcessPtr) process = Some(ProcessPtr, parent);
-    CallContext syscall_context = CallContext__new(&process, SYSCALL_EXEC, (Anything)&exec_request, 0, 0, 0, 0);
+    CallContext syscall_context =
+        CallContext__new(&process, &None(ThreadPtr), SYSCALL_EXEC, (Anything)&exec_request, 0, 0, 0, 0);
 
     context = OriginatingContext__syscall(kernel, &syscall_context);
 
     Scheduler__schedule(kernel->scheduler, parent);
-    Scheduler__preempt(kernel->scheduler, cpu, &no_process_context);
+    Scheduler__preempt(kernel->scheduler, cpu, &no_thread_context);
 }
 
 void tearDown(void)
 {
     reset_cpu_count();
+}
+
+void test_syscall_origin_preserves_sibling_for_deferred_context(void)
+{
+    Stack stack = Stack__new(4096);
+    Thread sibling = Thread__new(parent, &stack);
+    CallContext call = CallContext__new(&Some(ProcessPtr, parent), &Some(ThreadPtr, &sibling), SYSCALL_EXEC,
+                                        (Anything)&exec_request, 0, 0, 0, 0);
+    OriginatingContext origin = OriginatingContext__syscall(kernel, &call);
+    KernelContext deferred = KernelContext__from_originating_context(&origin);
+
+    match_optional(deferred.thread,
+        some(thread)
+        {
+            TEST_ASSERT_EQUAL_PTR(&sibling, thread);
+        },
+        none_test_fail()
+    );
 }
 
 void test_embedded_exec_does_not_require_a_kernel_filesystem(void)
@@ -87,7 +107,7 @@ void test_embedded_exec_does_not_require_a_kernel_filesystem(void)
 
 void test_exec_spawns_process_and_puts_parent_in_wait()
 {
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->thread.state);
     TEST_ASSERT_EQUAL(1, Scheduler__process_count(kernel->scheduler));
     ProcessArguments arguments = ProcessArguments__new();
     match_result(
@@ -95,7 +115,7 @@ void test_exec_spawns_process_and_puts_parent_in_wait()
         success(spawned_process)
         {
             ProcessPtr spawned_parent = unwrap_optional(spawned_process->parent, parent);
-            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->state);
+            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, parent->thread.state);
             TEST_ASSERT_EQUAL(parent, spawned_parent);
             TEST_ASSERT_EQUAL(2, Scheduler__process_count(kernel->scheduler));
         },
@@ -138,7 +158,7 @@ void test_exec_frees_temporary_elf_read_buffer(void)
 
 void test_exec_spawns_process_and_sets_up_a_defferred_return()
 {
-    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
+    TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->thread.state);
     TEST_ASSERT_EQUAL(1, Scheduler__process_count(kernel->scheduler));
     ReturnCode return_code = 55;
 
@@ -148,9 +168,9 @@ void test_exec_spawns_process_and_sets_up_a_defferred_return()
         success(spawned_process)
         {
             Scheduler__exit(kernel->scheduler, spawned_process, return_code);
-            Scheduler__preempt(kernel->scheduler, cpu, &no_process_context);
+            Scheduler__preempt(kernel->scheduler, cpu, &no_thread_context);
 
-            TEST_ASSERT_EQUAL(return_code, unwrap_result(deferred_syscall_result(), 0));
+            TEST_ASSERT_EQUAL(return_code, Process__required_context(parent)->x[0]);
         },
         error_test_fail()
     );
@@ -164,12 +184,12 @@ void test_exec_wait_schedules_child_on_parent_cpu(void)
     ProcessPtr cpu1_parent = dummy_process(1, 1, PROC_STATE_RUNNING);
     kernel->boot_authority = cpu1_parent->pid;
     SpawnRequest request = test_spawn_request(&bstr("/sbin/hello_world"));
-    CallContext syscall_context =
-        CallContext__new(&Some(ProcessPtr, cpu1_parent), SYSCALL_EXEC, (Anything)&request, 0, 0, 0, 0);
+    CallContext syscall_context = CallContext__new(&Some(ProcessPtr, cpu1_parent), &None(ThreadPtr), SYSCALL_EXEC,
+                                                   (Anything)&request, 0, 0, 0, 0);
     OriginatingContext cpu1_context = OriginatingContext__syscall(kernel, &syscall_context);
 
     Scheduler__schedule(kernel->scheduler, cpu1_parent);
-    Scheduler__preempt(kernel->scheduler, 1, &no_process_context);
+    Scheduler__preempt(kernel->scheduler, 1, &no_thread_context);
 
     ProcessArguments arguments = ProcessArguments__new();
     match_result(
@@ -182,7 +202,7 @@ void test_exec_wait_schedules_child_on_parent_cpu(void)
                            none_test_fail()
             );
 
-            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, cpu1_parent->state);
+            TEST_ASSERT_EQUAL(PROC_STATE_WAITING, cpu1_parent->thread.state);
         },
         error_test_fail()
     );
@@ -193,7 +213,7 @@ void test_exec_marks_hundeschau_as_hund_identity(void)
     Process__set_hund_identity(parent);
     SpawnRequest request = test_spawn_request(&bstr("/sbin/services/hundeschau"));
     CallContext syscall_context =
-        CallContext__new(&Some(ProcessPtr, parent), SYSCALL_EXEC, (Anything)&request, 0, 0, 0, 0);
+        CallContext__new(&Some(ProcessPtr, parent), &None(ThreadPtr), SYSCALL_EXEC, (Anything)&request, 0, 0, 0, 0);
     OriginatingContext hundeschau_context = OriginatingContext__syscall(kernel, &syscall_context);
 
     ProcessArguments arguments = ProcessArguments__new();
@@ -251,6 +271,21 @@ void test_exec_apply_builtin_identity_policy_marks_mama_as_hund(void)
     process->name = bstr("/sbin/services/hunde-mama");
     Exec__apply_builtin_identity_policy(process);
     TEST_ASSERT_EQUAL_UINT64(PROCESS_USER_HUND, process->user_id);
+}
+
+void test_exec_grants_terminal_signal_capability_only_to_io_host(void)
+{
+    ProcessPtr io_host = dummy_process(0, cpu, PROC_STATE_NEW);
+    io_host->name = bstr("/sbin/services/hunde-io-host");
+    Process__set_hund_identity(io_host);
+    Exec__apply_builtin_identity_policy(io_host);
+    TEST_ASSERT_TRUE(Process__has_capability(io_host, PROCESS_CAP_SIGNAL_TERMINAL));
+
+    ProcessPtr other_service = dummy_process(0, cpu, PROC_STATE_NEW);
+    other_service->name = bstr("/sbin/services/hunde-treiber-host");
+    Process__set_hund_identity(other_service);
+    Exec__apply_builtin_identity_policy(other_service);
+    TEST_ASSERT_FALSE(Process__has_capability(other_service, PROCESS_CAP_SIGNAL_TERMINAL));
 }
 
 void test_exec_as_can_spawn_shell_as_user(void)

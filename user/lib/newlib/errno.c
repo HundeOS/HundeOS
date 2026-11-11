@@ -1,12 +1,29 @@
 #include <errno.h>
 #include <sys/reent.h>
+#include "thread_state.h"
+#include "../sys/thread_local.h"
 
 struct _reent _impure_data;
 struct _reent * _impure_ptr = &_impure_data;
 
+size_t LibC__thread_state_size(void)
+{
+    return sizeof(struct _reent);
+}
+
+struct _reent * __getreent(void)
+{
+    Address state = ThreadLocal__libc_state();
+    if (state == 0)
+    {
+        return &_impure_data;
+    }
+    return (struct _reent *)state;
+}
+
 int * __errno(void)
 {
-    return &_REENT_ERRNO(_impure_ptr);
+    return &_REENT_ERRNO(__getreent());
 }
 
 const char * strerror(int error_number)

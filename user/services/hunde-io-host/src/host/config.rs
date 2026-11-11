@@ -79,6 +79,13 @@ impl Configuration {
             let Some(kind) = fields.next() else {
                 continue;
             };
+            if kind == "virtio-driver" {
+                fields
+                    .next()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .filter(|value| *value != 0)
+                    .ok_or(IoError(IO_INVALID_PATH))?;
+            }
             let name = fields.next().ok_or(IoError(IO_INVALID_PATH))?;
             let source = fields.next().ok_or(IoError(IO_INVALID_PATH))?;
             if fields.next().is_some()
@@ -88,7 +95,7 @@ impl Configuration {
                 return Err(IoError(IO_INVALID_PATH));
             }
             match kind {
-                "driver" => {}
+                "driver" | "polled-driver" | "virtio-driver" => {}
                 "service" => {
                     if (name.starts_with('/') && !crate::filesystem::control::canonical(name))
                         || (!name.starts_with('/') && !identifier(name))
@@ -160,7 +167,7 @@ mod tests {
                 .iter()
                 .map(|service| service.name.as_str())
                 .collect::<Vec<_>>(),
-            ["socket_router", "hund-rohr"]
+            ["socket_router", "network", "hund-rohr"]
         );
         assert_eq!(
             config.filesystems.find("ext2.wuff").unwrap().path(),

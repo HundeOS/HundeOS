@@ -7,15 +7,16 @@
 #include "../../../kernel/scheduler/scheduler.h"
 #include "../fixtures/kernel.h"
 #include "../stubs/panic.h"
-#include "../stubs/process_context_layout.h"
+#include "../stubs/cpu.h"
+#include "../stubs/thread_context_layout.h"
 
 #define Exit__handler(kernel, proc, ...) Exit__handler((kernel), &(proc), __VA_ARGS__)
 
 static ProcessPtr process = NULL;
 static KernelPtr kernel = NULL;
 static CPUID cpu = 11;
-static struct ProcessContext saved_context;
-static ProcessContextPtr context = &saved_context;
+static struct ThreadContext saved_context;
+static ThreadContextPtr context = &saved_context;
 static ProcessPtr idle = NULL;
 static bool cont_called = false;
 static KernelContext parent_context = EMPTY_KERNEL_CONTEXT;
@@ -29,6 +30,8 @@ Result(Anything) continuation(ParkedOperationPtr operation)
 
 void setUp(void)
 {
+    set_cpu_id(cpu);
+    CPUStub__set_reschedule_hook(NULL);
     saved_context.elr = 0x12345;
     kernel = init_test_kernel();
     Scheduler__start(kernel->scheduler, cpu);
@@ -49,7 +52,7 @@ ProcessPtr setup_test_process(void)
     process = dummy_process(100, cpu, PROC_STATE_RUNNING);
 
     Scheduler__schedule(kernel->scheduler, process);
-    Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
+    Scheduler__preempt(kernel->scheduler, cpu, &Some(ThreadContextPtr, context));
 
     return process;
 }
@@ -59,10 +62,10 @@ ProcessPtr setup_test_process_waiting_on_child_process(ProcessPtr parent)
     ProcessPtr child = dummy_process_with_parent(100, cpu, PROC_STATE_READY, parent);
     Scheduler__schedule(kernel->scheduler, process);
 
-    parent_context = NEW_KERNEL_CONTEXT(kernel->scheduler, Some(ProcessID, parent->pid));
+    parent_context = NEW_KERNEL_CONTEXT(kernel->scheduler, Some(ThreadPtr, &parent->thread));
     Scheduler__park(kernel->scheduler, parent, &parent_context, &Some(Continuation, continuation), PARK_WAIT_CHILD);
     Scheduler__schedule(kernel->scheduler, child);
-    Scheduler__preempt(kernel->scheduler, cpu, &Some(ProcessContextPtr, context));
+    Scheduler__preempt(kernel->scheduler, cpu, &Some(ThreadContextPtr, context));
 
     return child;
 }
@@ -81,7 +84,7 @@ void test_exit_handler_interrupts_and_removes_process_from_scheduler(void)
         none_test_fail()
     );
 
-    Exit__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0);
+    Exit__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr));
 
     match_optional(
         Scheduler__current_process(kernel->scheduler, cpu),
@@ -100,6 +103,27 @@ void test_exit_handler_interrupts_and_removes_process_from_scheduler(void)
     );
 }
 
+void test_exit_handler_terminates_process_with_inactive_sibling(void)
+{
+    setup_test_process();
+    ProcessID pid = process->pid;
+    Thread sibling = Thread__new(process, &process->thread.stack);
+    match_result(ProcessThreads__push(&process->threads, &sibling),
+        success_do_nothing(),
+        error_test_fail()
+    );
+
+    match_result(Exit__handler(kernel, Some(ProcessPtr, process), 0, 0, 0, 0, 0, &None(ThreadPtr)),
+                 success_do_nothing(),
+        error_test_fail()
+    );
+    match_optional(Scheduler__find_process_by_pid(kernel->scheduler, pid),
+        some_test_fail(),
+        none_do_nothing()
+    );
+    TEST_ASSERT_EQUAL(PROC_STATE_DEAD, sibling.state);
+}
+
 void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_process(void)
 {
     ProcessPtr parent = setup_test_process();
@@ -115,10 +139,10 @@ void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_
         none_test_fail()
     );
 
-    Exit__handler(kernel, Some(ProcessPtr, child), 0, 0, 0, 0, 0);
+    Exit__handler(kernel, Some(ProcessPtr, child), 0, 0, 0, 0, 0, &None(ThreadPtr));
     Scheduler__preempt(
         kernel->scheduler, cpu,
-        &Some(ProcessContextPtr, context)); // make sure the parent is woken up ( it was waiting on the child
+        &Some(ThreadContextPtr, context)); // make sure the parent is woken up ( it was waiting on the child
 
     match_optional(
         Scheduler__current_process(kernel->scheduler, cpu),
@@ -126,7 +150,7 @@ void test_exit_handler_interrupts_and_removes_process_when_parent_is_waiting_on_
         {
             TEST_ASSERT_NOT_EQUAL(idle, current);
             TEST_ASSERT_EQUAL(parent, current);
-            TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->state);
+            TEST_ASSERT_EQUAL(PROC_STATE_RUNNING, parent->thread.state);
         },
         none_test_fail()
     );

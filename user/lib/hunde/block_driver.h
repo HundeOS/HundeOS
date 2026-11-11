@@ -27,7 +27,6 @@ HundeStatusResult hunde_block_driver_sleep_usec(uint64_t usec);
 HundeStatusResult hunde_block_driver_await(void * storage);
 HundeStatusResult hunde_block_driver_register(HundeByteSpan name, uint64_t sectors);
 int64_t hunde_block_buffer_device_address(ConstHundeBlockBufferPtr buffer, uint64_t offset, uint64_t length);
-uint64_t hunde_block_driver_monotonic_usec(void);
 void hunde_block_driver_record(uint64_t blocks, uint64_t device_usec, uint32_t succeeded);
 
 #endif

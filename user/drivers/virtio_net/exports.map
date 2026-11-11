@@ -1,0 +1,4 @@
+{
+    global: hunde_driver_component_entry_v1;
+    local: *;
+};

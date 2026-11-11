@@ -6,8 +6,10 @@
 
 #include "../common/process/process_types.h"
 
+typedef uint64_t ProcessPriority;
+
 bool ProcessClass__is_service(ProcessClass self);
-uint64_t ProcessClass__priority(ProcessClass self);
+ProcessPriority ProcessClass__priority(ProcessClass self);
 const char * ProcessClass__to_string(ProcessClass self);
 
 #endif

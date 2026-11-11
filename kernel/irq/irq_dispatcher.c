@@ -154,14 +154,15 @@ Result(Address) IRQDispatcher__register_manager(IRQDispatcherPtr self, ProcessPt
         {
             KernelNotificationQueuePtr queue = k_v_ptr(memory, KernelNotificationQueue);
             *queue = KernelNotificationQueue__new();
-            PageTable__map_shared(&process->page_table, process->kernel, memory, KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
+            PageTable__map_shared(&process->address_space.page_table, process->kernel, memory,
+                                  KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
             critical_section(
                 self->lock,
                 {
                     if (!is_nothing(self->manager))
                     {
-                        PageTable__unmap(&process->page_table, process->kernel, KERNEL_NOTIFICATION_QUEUE_ADDRESS,
-                                         KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
+                        PageTable__unmap(&process->address_space.page_table, process->kernel,
+                                         KERNEL_NOTIFICATION_QUEUE_ADDRESS, KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
                         Kernel__free(memory.kernel_addr.virtual_addr);
                         cs_return(Error(Address, interrupt_manager_exists, SERVICE_INTERRUPT_MANAGER_EXISTS));
                     }
@@ -355,7 +356,7 @@ Result(IRQRegistrationStatus) IRQDispatcher__dispose_process_resources(IRQDispat
         manager_memory,
         some(memory)
         {
-            PageTable__unmap(&process->page_table, process->kernel, memory.virtual_addr,
+            PageTable__unmap(&process->address_space.page_table, process->kernel, memory.virtual_addr,
                              KERNEL_NOTIFICATION_QUEUE_PAGE_SIZE);
             match_result(
                 Kernel__free(memory.kernel_addr.virtual_addr),

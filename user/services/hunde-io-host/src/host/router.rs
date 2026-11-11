@@ -100,15 +100,19 @@ impl<Filesystem: IoComponent> IoComponent for Router<Filesystem> {
             Operation::Link { source, target } => (*source, *target, 0),
             _ => return self.dispatcher.execute(None, request),
         };
-        if path.starts_with(b"socket://") {
-            if self.dispatcher.contains("socket_router") {
-                return self.dispatcher.execute(Some("socket_router"), request);
+        let stream_service = if path.starts_with(b"socket://") {
+            Some("socket_router")
+        } else if path.starts_with(b"tcp://") {
+            Some("network")
+        } else {
+            None
+        };
+        if let Some(service) = stream_service {
+            if self.dispatcher.contains(service) {
+                return self.dispatcher.execute(Some(service), request);
             }
             return Ok(Some(Reply::Redirect(Redirect::new(
-                "socket_router",
-                path,
-                target,
-                offset,
+                service, path, target, offset,
             )?)));
         }
         let operation = match &request.operation {
@@ -287,6 +291,28 @@ mod tests {
         assert_ne!(reader, writer);
         assert_ne!(reader.0, file);
         assert_ne!(writer.0, socket);
+    }
+
+    #[test]
+    fn tcp_uses_the_hosted_network_component_and_preserves_the_endpoint() {
+        use crate::host::dispatch::Worker;
+        let mut router = router(ConsoleOutput::Serial);
+        let path = b"tcp://127.0.0.1:8080";
+        let mut network = Worker::new(
+            router.dispatcher.clone(),
+            ServiceName::new("network"),
+            LocalBackend::new(path),
+        )
+        .unwrap();
+        assert_eq!(
+            router.execute(request(Operation::Open(path, IO_OPEN_READ))),
+            Ok(None)
+        );
+        network.poll();
+        assert!(matches!(
+            router.execute(request(Operation::Open(path, IO_OPEN_READ))),
+            Ok(Some(Reply::Value(_)))
+        ));
     }
 
     fn authorize(_pid: ProcessId) -> Result<(), IoError> {

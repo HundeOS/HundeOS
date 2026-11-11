@@ -6,12 +6,12 @@
 #define RISCV_COMPRESSED_LOAD_WORD 0x2U
 #define RISCV_COMPRESSED_LOAD_DOUBLE 0x3U
 
-static Address RiscVMMIOLoad__address(ProcessContextPtr context, uint32_t base_register, int64_t offset)
+static Address RiscVMMIOLoad__address(ThreadContextPtr context, uint32_t base_register, int64_t offset)
 {
     return context->x[base_register] + (uint64_t)offset;
 }
 
-static Optional(RiscVMMIOLoad) RiscVMMIOLoad__standard(uint32_t instruction, ProcessContextPtr context)
+static Optional(RiscVMMIOLoad) RiscVMMIOLoad__standard(uint32_t instruction, ThreadContextPtr context)
 {
     if ((instruction & 0x7fU) != RISCV_OPCODE_LOAD)
     {
@@ -45,7 +45,7 @@ static Optional(RiscVMMIOLoad) RiscVMMIOLoad__standard(uint32_t instruction, Pro
     return Some(RiscVMMIOLoad, load);
 }
 
-static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_register(uint16_t instruction, ProcessContextPtr context)
+static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_register(uint16_t instruction, ThreadContextPtr context)
 {
     uint32_t operation = instruction >> 13U;
     uint32_t destination_register = 8U + ((instruction >> 2U) & 0x7U);
@@ -76,7 +76,7 @@ static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_register(uint16_t instr
     return Some(RiscVMMIOLoad, load);
 }
 
-static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_stack(uint16_t instruction, ProcessContextPtr context)
+static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_stack(uint16_t instruction, ThreadContextPtr context)
 {
     uint32_t operation = instruction >> 13U;
     uint32_t destination_register = (instruction >> 7U) & 0x1fU;
@@ -112,7 +112,7 @@ static Optional(RiscVMMIOLoad) RiscVMMIOLoad__compressed_stack(uint16_t instruct
     return Some(RiscVMMIOLoad, load);
 }
 
-Optional(RiscVMMIOLoad) RiscVMMIOLoad__decode(uint32_t instruction, ProcessContextPtr context)
+Optional(RiscVMMIOLoad) RiscVMMIOLoad__decode(uint32_t instruction, ThreadContextPtr context)
 {
     if ((instruction & 0x3U) == 0x3U)
     {
@@ -132,7 +132,7 @@ Optional(RiscVMMIOLoad) RiscVMMIOLoad__decode(uint32_t instruction, ProcessConte
     return None(RiscVMMIOLoad);
 }
 
-void RiscVMMIOLoad__perform(ConstRiscVMMIOLoadPtr self, Address access_address, ProcessContextPtr context)
+void RiscVMMIOLoad__perform(ConstRiscVMMIOLoadPtr self, Address access_address, ThreadContextPtr context)
 {
     uint64_t value;
     if (self->width == sizeof(uint8_t))

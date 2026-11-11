@@ -19,6 +19,51 @@ typedef int64_t ProcessIdentityResult;
 typedef int64_t ProcessForkResult;
 typedef int64_t ProcessGroupResult;
 typedef int64_t ProcessRegistryMapResult;
+typedef uint64_t ThreadID;
+
+typedef struct ThreadLocalImage
+{
+    uint64_t address;
+    uint64_t initialized_size;
+    uint64_t size;
+    uint64_t alignment;
+} ThreadLocalImage;
+
+typedef ThreadLocalImage * ThreadLocalImagePtr;
+typedef const ThreadLocalImage * ConstThreadLocalImagePtr;
+ResultDef(ThreadLocalImage);
+
+static inline ThreadLocalImage ThreadLocalImage__new(uint64_t address, uint64_t initialized_size, uint64_t size,
+                                                     uint64_t alignment)
+{
+    return (ThreadLocalImage){
+        .address = address, .initialized_size = initialized_size, .size = size, .alignment = alignment};
+}
+
+typedef int64_t ThreadCreateResult;
+typedef int64_t ThreadJoinStatus;
+
+typedef struct ThreadJoinResult
+{
+    uint64_t value;
+} ThreadJoinResult;
+
+typedef ThreadJoinResult * ThreadJoinResultPtr;
+ResultDef(ThreadJoinResult);
+
+static inline ThreadJoinResult ThreadJoinResult__new(uint64_t value)
+{
+    return (ThreadJoinResult){.value = value};
+}
+
+typedef enum ThreadOperationStatus
+{
+    THREAD_OPERATION_OK = 0,
+    THREAD_OPERATION_INVALID = -1,
+    THREAD_OPERATION_NO_MEMORY = -2,
+    THREAD_OPERATION_NOT_FOUND = -3,
+    THREAD_OPERATION_BUSY = -4,
+} ThreadOperationStatus;
 
 typedef uint64_t ProcessSignal;
 typedef ProcessSignal * ProcessSignalPtr;
@@ -26,6 +71,7 @@ typedef uint64_t ProcessSignalMask;
 typedef uint64_t UserID;
 typedef uint64_t GroupID;
 typedef uint64_t ProcessGroupID;
+ResultDef(ProcessGroupID);
 typedef uint64_t ProcessSessionID;
 typedef uint64_t ProcessCapabilities;
 
@@ -63,7 +109,6 @@ typedef enum ProcessForkStatus
     PROCESS_FORK_UNSUPPORTED_STATE = -3,
     PROCESS_FORK_SCHEDULE_FAILED = -4,
     PROCESS_FORK_INVALID_OPERATION = -5,
-    PROCESS_FORK_ALREADY_PENDING = -6,
     PROCESS_FORK_CHILD_NOT_FOUND = -7,
 } ProcessForkStatus;
 
@@ -152,8 +197,15 @@ typedef enum ProcessCapabilityBits
     PROCESS_CAP_MOUNT_FILESYSTEM = 1ULL << 5,
     PROCESS_CAP_USE_BLOCK_DEVICES = 1ULL << 6,
     PROCESS_CAP_MANAGE_SHARED_PAGES = 1ULL << 7,
+    PROCESS_CAP_SIGNAL_TERMINAL = 1ULL << 8,
     PROCESS_CAP_ALL = UINT64_MAX,
 } ProcessCapabilityBits;
+
+typedef enum ProcessSignalOrigin
+{
+    PROCESS_SIGNAL_ORIGIN_PROCESS = 0,
+    PROCESS_SIGNAL_ORIGIN_TERMINAL = 1,
+} ProcessSignalOrigin;
 
 typedef enum ProcessSignals
 {

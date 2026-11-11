@@ -22,10 +22,19 @@
 
 typedef uint64_t SchedulerInitStatus;
 typedef uint64_t SchedulerScheduleStatus;
+ResultDef(ThreadID);
+ResultDef(ThreadJoinStatus);
 
 ResultDef(SchedulerInitStatus);
 ResultDef(SchedulerScheduleStatus);
-ResultDef(ProcessGroupID);
+Result(ThreadID) Scheduler__create_thread(SchedulerPtr self, ThreadPtr caller, Address trampoline,
+                                          Address start_function, Anything argument, Address thread_pointer);
+Result(ThreadJoinStatus)
+    Scheduler__join_thread(SchedulerPtr self, ThreadPtr caller, ThreadID target_id, ThreadJoinResultPtr result);
+Result(ThreadJoinStatus) Scheduler__exit_thread(SchedulerPtr self, ThreadPtr caller, Anything value);
+Result(ThreadWaitStatus) Scheduler__wait_atomic(SchedulerPtr self, ThreadPtr caller, Address address,
+                                                ThreadWaitValue expected, ThreadWaitTimeout timeout_usec);
+Result(ThreadWakeResult) Scheduler__wake_atomic(SchedulerPtr self, ThreadPtr caller, Address address, uint64_t count);
 ResultDef(ProcessSessionID);
 OptionalDef(CPUID);
 
@@ -65,6 +74,7 @@ ResultDef(SchedulerWake);
 typedef struct CPUScheduler
 {
     ProcessTable processes;
+    ThreadTable threads;
     ProcessPtr idle_process;
     mutex_t scheduler_lock;
     Tick last_tick;
@@ -72,7 +82,9 @@ typedef struct CPUScheduler
     uint64_t registry_slot;
     bool started;
     uint64_t last_registry_sample_usec;
-    Optional(ProcessPtr) switching_out;
+    Optional(ThreadPtr) switching_out;
+    Optional(ProcessPtr) active_process;
+    Optional(ProcessPtr) dispatching_process;
 } CPUScheduler;
 
 typedef CPUScheduler * CPUSchedulerPtr;
@@ -124,9 +136,11 @@ SchedulerPtr Scheduler__heap_new(void);
 
 Result(SchedulerInitStatus) Scheduler__init(KernelPtr kernel, SchedulerPtr self, Elf idle_process);
 Result(SchedulerInitStatus) Scheduler__register_cpu(SchedulerPtr self, CPUID cpu);
-void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context);
-void Scheduler__yield_runnable(SchedulerPtr self, ProcessPtr yielding_proc, CPUID cpu);
-void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu);
+void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ThreadContextPtr) context);
+void Scheduler__address_space_switched(SchedulerPtr self, CPUID cpu, ProcessPtr process);
+void Scheduler__revoke_current_if_terminating(SchedulerPtr self, CPUID cpu, ThreadContextPtr context);
+void Scheduler__yield_runnable(SchedulerPtr self, ThreadPtr yielding_thread, CPUID cpu);
+void Scheduler__yield_waiting(SchedulerPtr self, ThreadPtr waiting_thread, CPUID cpu);
 Result(ProcessID) Scheduler__exit(SchedulerPtr scheduler, ProcessPtr proc, ReturnCode return_code);
 Result(ProcessID) Scheduler__abort_process(SchedulerPtr scheduler, ProcessPtr proc, ProcessAbort abort);
 
@@ -152,8 +166,8 @@ Result(ProcessID) Scheduler__park_by_pid_with_context_ownership_and_operation_ke
 
 Result(ProcessPtr)
     Scheduler__unpark(SchedulerPtr self, ProcessPtr proc, ParkReason reason, OptionalPtr(ReturnCode) return_code);
-Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, uint64_t usec);
-Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ProcessPtr process, ProcessSignalMask mask);
+Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ThreadPtr thread, uint64_t usec);
+Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ThreadPtr thread, ProcessSignalMask mask);
 
 Result(ProcessID)
     Scheduler__unpark_by_pid(SchedulerPtr self, ProcessID pid, ParkReason reason, OptionalPtr(ReturnCode) return_code);
@@ -163,6 +177,7 @@ Result(ProcessID) Scheduler__unpark_by_pid_with_operation_key(SchedulerPtr self,
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu);
+Optional(ThreadPtr) Scheduler__current_thread(SchedulerPtr self, CPUID cpu);
 bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu);
 Optional(ProcessPtr) Scheduler__find_process_by_pid(SchedulerPtr self, ProcessID pid);
 Optional(ProcessPtr) Scheduler__find_process_by_pid_locked(SchedulerPtr self, ProcessID pid);
@@ -176,8 +191,9 @@ Result(ServiceCode)
     Scheduler__require_process_capability(SchedulerPtr self, ProcessID pid, ProcessCapabilities capability);
 Result(ProcessID) Scheduler__queue_signal(SchedulerPtr self, ProcessID pid, ProcessSignal signal);
 Result(ProcessID) Scheduler__send_signal(SchedulerPtr self, ProcessPtr sender, int64_t target, ProcessSignal signal);
-ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, ProcessPtr process,
-                                                            ProcessContextPtr context);
+Result(ProcessID) Scheduler__send_terminal_interrupt(SchedulerPtr self, ProcessPtr sender, int64_t target);
+ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, ThreadPtr thread,
+                                                            ThreadContextPtr context);
 Result(Address)
     Scheduler__alloc_shared_page(SchedulerPtr self, ProcessPtr owner, ProcessID first_peer, ProcessID second_peer);
 Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr owner, Address address);
@@ -191,7 +207,7 @@ Result(SchedulerWake)
     Scheduler__queue_data_available(SchedulerPtr self, ProcessPtr process, QueueConnectionID connection);
 Result(SchedulerWake) Scheduler__wake_shared_wait(SchedulerPtr self, ProcessPtr process);
 Result(QueueWaitCode)
-    Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, IpcEventGeneration observed, Tick ticks);
+    Scheduler__queue_wait(SchedulerPtr self, ThreadPtr thread, IpcEventGeneration observed, Tick ticks);
 ProcessTablePtr Scheduler__all_processes(SchedulerPtr self, CPUID cpu);
 ProcessTable Scheduler__all_processes_for_all_cpus(SchedulerPtr self);
 ProcessTable Scheduler__process_snapshot(SchedulerPtr self);
@@ -199,8 +215,7 @@ ProcessListResult Scheduler__process_info_snapshot(SchedulerPtr self, ProcessInf
 
 uint64_t Scheduler__process_count(SchedulerPtr self);
 
-Optional(ProcessPtr)
-    Scheduler__save_context(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context);
+Optional(ThreadPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, const OptionalPtr(ThreadContextPtr) context);
 
 Result(SchedulerScheduleStatus) Scheduler__schedule(SchedulerPtr self, ProcessPtr new_proc);
 Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc, CPUID cpu);

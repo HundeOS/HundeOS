@@ -22,6 +22,7 @@ static FaultCallContext FaultCallContext__new()
 OriginatingContext OriginatingContext__syscall(KernelPtr kernel, ConstCallContextPtr syscall)
 {
     OriginatingContext context = OriginatingContext__new(kernel, CALL_TYPE_SYSCALL, &syscall->process_opt);
+    context.thread = syscall->thread;
     context.call.syscall = *syscall;
     return context;
 }

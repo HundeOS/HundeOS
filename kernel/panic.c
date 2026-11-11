@@ -7,7 +7,7 @@
 #include "kernel_init.h"
 #include "print.h"
 
-void Kernel__panic(const char * message, ProcessContextPtr context)
+void Kernel__panic(const char * message, ThreadContextPtr context)
 {
     KernelPtr kernel = Kernel__instance();
     match_optional(

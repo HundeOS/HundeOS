@@ -11,6 +11,7 @@ static ServiceDirectoryPtr fixture_directory(void)
 #define ServiceDirectory__shared fixture_directory
 #include "../../../user/lib/channel/block_client.c"
 #include "../../../user/lib/channel/block_server.c"
+#include "../../../user/lib/hunde/channel_native.c"
 #undef ServiceDirectory__shared
 
 static BlockServer block_server;
@@ -84,6 +85,33 @@ static BlockClient open_client(void)
         error_test_fail()
     );
     return (BlockClient){0};
+}
+
+void test_rust_channel_bridge_preserves_pending_reply_size_and_buffer_authority(void)
+{
+    Channel channel;
+    HundeStatusResult opened = hunde_channel_open(&channel, HundeByteSpan__new((const uint8_t *)"/dev/virtio4", 12));
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, opened.kind);
+    TEST_ASSERT_EQUAL_UINT64(8, hunde_channel_server_pid(&channel));
+    BlockChannelRequest request = BlockChannelRequest__new(BLOCK_PROTOCOL_DESCRIBE, 0);
+    HundeStatusResult sent =
+        hunde_channel_send(&channel, HundeByteSpan__new((const uint8_t *)&request, sizeof(request)));
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, sent.kind);
+    BlockChannelResponse reply;
+    RustNativeValue pending = hunde_channel_receive(&channel, (uint8_t *)&reply, sizeof(reply));
+    TEST_ASSERT_EQUAL(HUNDE_IO_PENDING, pending.status.kind);
+    current_pid = 8;
+    BlockServer__poll(&block_server);
+    current_pid = 42;
+    RustNativeValue received = hunde_channel_receive(&channel, (uint8_t *)&reply, sizeof(reply));
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, received.status.kind);
+    TEST_ASSERT_EQUAL_UINT64(sizeof(reply), received.value);
+    TEST_ASSERT_EQUAL_UINT64(16, reply.block_count);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_SUCCESS, hunde_buffer_validate(&reply.buffers.read, 8, BUFFER_READ).kind);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_ERROR, hunde_buffer_validate(&reply.buffers.read, 99, BUFFER_READ).kind);
+    TEST_ASSERT_EQUAL(HUNDE_ABI_ERROR, hunde_buffer_validate(&reply.buffers.read, 8, BUFFER_WRITE).kind);
+    hunde_channel_close(&channel);
+    ChannelFixture__drain();
 }
 
 void test_block_client_reuses_channel_for_describe_write_and_multisector_read(void)

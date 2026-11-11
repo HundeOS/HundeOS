@@ -20,6 +20,7 @@ static unsigned channel_calls;
 static IOReply replies[3];
 static IOHandle opened;
 static uint64_t foreground_pid;
+static ProcessGroupID foreground_group;
 
 IOReply IOClient__path_request(IORequestOperation operation, ConstBStringPtr path, Flags flags, uint64_t offset)
 {
@@ -64,6 +65,21 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
 {
     channel_calls++;
     foreground_pid = pid;
+    return IO_OK;
+}
+
+IOReply IOClient__get_foreground_group(IOHandle handle)
+{
+    channel_calls++;
+    TEST_ASSERT_EQUAL_INT64(opened, handle);
+    return IOReply__new(IO_OK, foreground_group);
+}
+
+IOStatus IOClient__set_foreground_group(IOHandle handle, uint64_t group)
+{
+    channel_calls++;
+    TEST_ASSERT_EQUAL_INT64(opened, handle);
+    foreground_group = group;
     return IO_OK;
 }
 
@@ -141,6 +157,7 @@ void setUp(void)
     channel_calls = 0;
     opened = IO_FILESYSTEM_HANDLE_BASE;
     foreground_pid = 0;
+    foreground_group = 0;
     replies[0] = IOReply__new(IO_OK, 0);
     replies[1] = IOReply__new(IO_OK, 0);
     replies[2] = IOReply__new(IO_OK, 0);
@@ -155,6 +172,20 @@ void test_terminal_foreground_control_uses_open_standard_input(void)
 
     TEST_ASSERT_EQUAL_UINT64(42, foreground_pid);
     TEST_ASSERT_EQUAL_UINT(2, channel_calls);
+}
+
+void test_terminal_group_control_resolves_standard_output_handle(void)
+{
+    IO__set_startup_stdio(IO_ENDPOINT_TTY_INPUT, IO_ENDPOINT_CONSOLE_OUTPUT, IO_ENDPOINT_CONSOLE_OUTPUT);
+    opened = IO_STREAM_HANDLE_BASE;
+    foreground_group = 14;
+
+    TEST_ASSERT_RESULT_SUCCESS(14, IO__get_terminal_foreground_group(STDERR_FILENO));
+    TEST_ASSERT_RESULT_SUCCESS(IO_OK, IO__set_terminal_foreground_group(STDERR_FILENO, 15));
+
+    TEST_ASSERT_EQUAL_UINT64(15, foreground_group);
+    TEST_ASSERT_EQUAL_UINT(3, channel_calls);
+    TEST_ASSERT_EQUAL_UINT(0, kernel_calls);
 }
 
 void test_terminal_paths_reflect_startup_endpoints_and_closed_streams(void)

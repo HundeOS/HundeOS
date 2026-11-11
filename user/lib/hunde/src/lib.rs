@@ -13,6 +13,8 @@ pub mod block_host;
 pub mod boot;
 #[cfg(feature = "alloc")]
 pub mod bootstrap;
+#[cfg(feature = "alloc")]
+pub mod channel;
 pub mod component;
 #[cfg(feature = "alloc")]
 pub mod devfs;
@@ -31,11 +33,15 @@ pub mod io;
 pub mod mmio;
 #[cfg(feature = "alloc")]
 mod native;
+#[cfg(feature = "alloc")]
+pub mod packet;
 pub mod process;
 pub mod protocol;
 pub mod runtime;
 #[cfg(feature = "alloc")]
 pub mod service;
 pub mod terminal;
+#[cfg(feature = "alloc")]
+pub mod virtio;
 #[cfg(feature = "alloc")]
 pub mod wuff;

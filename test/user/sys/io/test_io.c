@@ -62,6 +62,16 @@ IOStatus IOClient__set_foreground_process(IOHandle handle, uint64_t pid)
     return IO_OPERATION_NOT_SUPPORTED;
 }
 
+IOReply IOClient__get_foreground_group(IOHandle handle)
+{
+    return IOReply__new(IO_OPERATION_NOT_SUPPORTED, 0);
+}
+
+IOStatus IOClient__set_foreground_group(IOHandle handle, uint64_t group)
+{
+    return IO_OPERATION_NOT_SUPPORTED;
+}
+
 IOTerminalAttributesResult IOClient__get_terminal_attributes(IOHandle handle)
 {
     return IOTerminalAttributesResult__new(IO_OPERATION_NOT_SUPPORTED, (IOTerminalAttributes){0});

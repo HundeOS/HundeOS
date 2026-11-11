@@ -177,7 +177,7 @@ static bool Queues__range_available(ProcessPtr process, Address address, size_t 
 {
     for_each_ll(
         UserAllocations,
-        process->user_allocations,
+        process->address_space.user_allocations,
         allocation,
         {
             Address start = allocation.address.virtual_addr;
@@ -245,12 +245,12 @@ static void QueueConnection__map(QueueConnectionPtr self, ProcessPtr process, bo
     {
         UserAddress page = UserAddress__relative(&self->memory, index * QUEUE_PAGE_SIZE);
         page.write = index == (client ? 1U : 2U);
-        PageTable__map_shared(&process->page_table, process->kernel, page, QUEUE_PAGE_SIZE);
+        PageTable__map_shared(&process->address_space.page_table, process->kernel, page, QUEUE_PAGE_SIZE);
     }
     UserAddress peer = client ? self->server_doorbell : self->client_doorbell;
     UserAddress alias = UserAddress__new(QueueLayout__peer_doorbell_address(self->connection), peer.kernel_addr, true,
                                          true, false, true);
-    PageTable__map_shared(&process->page_table, process->kernel, alias, QUEUE_PAGE_SIZE);
+    PageTable__map_shared(&process->address_space.page_table, process->kernel, alias, QUEUE_PAGE_SIZE);
     if (client)
     {
         self->client_peer_doorbell_mapped = true;
@@ -268,8 +268,8 @@ static void QueueConnection__unmap_peer_doorbell(QueueConnectionPtr self, Proces
     {
         return;
     }
-    PageTable__unmap(&process->page_table, process->kernel, QueueLayout__peer_doorbell_address(self->connection),
-                     QUEUE_PAGE_SIZE);
+    PageTable__unmap(&process->address_space.page_table, process->kernel,
+                     QueueLayout__peer_doorbell_address(self->connection), QUEUE_PAGE_SIZE);
     if (client)
     {
         self->client_peer_doorbell_mapped = false;
@@ -285,8 +285,8 @@ static void QueueConnection__unmap(QueueConnectionPtr self, ProcessPtr process, 
 {
     for (uint64_t index = 0; index < 3; index++)
     {
-        PageTable__unmap(&process->page_table, process->kernel, self->memory.virtual_addr + index * QUEUE_PAGE_SIZE,
-                         QUEUE_PAGE_SIZE);
+        PageTable__unmap(&process->address_space.page_table, process->kernel,
+                         self->memory.virtual_addr + index * QUEUE_PAGE_SIZE, QUEUE_PAGE_SIZE);
     }
     QueueConnection__unmap_peer_doorbell(self, process, client);
 }
@@ -361,7 +361,7 @@ static void QueueListener__release(QueueListenerPtr self)
 
 Result(Address) Queues__listen(QueuesPtr self, ProcessPtr process, ConstBStringPtr name)
 {
-    if (!ProcessClass__is_service(process->process_class) ||
+    if (!ProcessClass__is_service(process->scheduling.process_class) ||
         !Process__has_capability(process, PROCESS_CAP_BECOME_SERVICE))
     {
         return Error(Address, queue_error, QUEUE_DENIED);
@@ -444,7 +444,8 @@ Result(Address) Queues__listen(QueuesPtr self, ProcessPtr process, ConstBStringP
                     );
                     QueueListeners__set(&self->listeners, selected,
                                         QueueListener__new(memory, &Some(ProcessPtr, process), endpoint));
-                    PageTable__map_shared(&process->page_table, process->kernel, memory, QUEUE_ARRIVALS_SIZE);
+                    PageTable__map_shared(&process->address_space.page_table, process->kernel, memory,
+                                          QUEUE_ARRIVALS_SIZE);
                     return Success(Address, address);
                 },
                 error(code, message)
@@ -492,7 +493,7 @@ static Result(QueueConnectionID) Queues__connect_to(QueuesPtr self, QueueListene
                 return Error(QueueConnectionID, queue_error, QUEUE_INVALID);
             }
             client_pid = process->pid;
-            client_limit = ProcessClass__is_service(process->process_class) &&
+            client_limit = ProcessClass__is_service(process->scheduling.process_class) &&
                                    Process__has_capability(process, PROCESS_CAP_MANAGE_SHARED_PAGES)
                                ? QUEUE_LIMIT
                                : QUEUE_CLIENT_CONNECTION_LIMIT;
@@ -965,8 +966,8 @@ void Queues__exit(QueuesPtr self, ProcessPtr process)
                     }
                     KernelServiceDirectory__remove_endpoint(&process->kernel->service_directory,
                                                             listener->endpoint);
-                    PageTable__unmap(&process->page_table, process->kernel, listener->arrivals.virtual_addr,
-                                     QUEUE_ARRIVALS_SIZE);
+                    PageTable__unmap(&process->address_space.page_table, process->kernel,
+                                     listener->arrivals.virtual_addr, QUEUE_ARRIVALS_SIZE);
                     listener->process = None(ProcessPtr);
                     QueueListener__release(listener);
                 },

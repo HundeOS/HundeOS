@@ -41,7 +41,7 @@ impl Default for Attributes {
 #[cfg(feature = "alloc")]
 mod client {
     use crate::abi::{ByteSpan, IoError, host};
-    use crate::io::{Handle, ProcessId, Reply};
+    use crate::io::{Handle, ProcessGroupId, ProcessId, Reply};
     use crate::protocol::{IO_PANIC, IO_REQUEST_OPEN, IO_REQUEST_READ, IO_REQUEST_WRITE};
 
     pub struct Stream {
@@ -113,16 +113,22 @@ mod client {
     pub fn interrupt(pid: ProcessId) -> Result<(), IoError> {
         unsafe { host::hunde_rust_terminal_interrupt(pid.0) }.into_result()
     }
+
+    pub fn interrupt_group(group: ProcessGroupId) -> Result<(), IoError> {
+        unsafe { host::hunde_rust_terminal_interrupt_group(group.0) }.into_result()
+    }
 }
 
 #[cfg(feature = "alloc")]
-pub use client::{Stream, interrupt};
+pub use client::{Stream, interrupt, interrupt_group};
 
 #[cfg(all(test, feature = "alloc"))]
 mod tests {
     use super::*;
     use crate::abi::RawRequest;
-    use crate::io::{Handle, Operation, OwnedRequest, ProcessId, Reply, Request, SessionId};
+    use crate::io::{
+        Handle, Operation, OwnedRequest, ProcessGroupId, ProcessId, Reply, Request, SessionId,
+    };
 
     #[test]
     fn terminal_controls_round_trip_through_the_owned_request_adapter() {
@@ -187,5 +193,21 @@ mod tests {
                 ));
             },
         );
+        for operation in [
+            Operation::GetForegroundGroup,
+            Operation::SetForegroundGroup(ProcessGroupId(123)),
+        ] {
+            RawRequest::with_request(
+                Request::new(SessionId(1), ProcessId(2), Handle(3), operation),
+                |raw| {
+                    let decoded = unsafe { Request::decode(raw) }.unwrap();
+                    assert!(matches!(
+                        decoded.operation,
+                        Operation::GetForegroundGroup
+                            | Operation::SetForegroundGroup(ProcessGroupId(123))
+                    ));
+                },
+            );
+        }
     }
 }

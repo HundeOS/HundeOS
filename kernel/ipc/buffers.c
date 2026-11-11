@@ -62,7 +62,7 @@ static void Buffers__notify(BuffersPtr self, SchedulerPtr scheduler, ManagedBuff
 static Result(Address) Buffers__register(BuffersPtr self, SchedulerPtr scheduler, ProcessPtr caller)
 {
     if (!BString__equals(&caller->name, &bstr("/sbin/services/hunde-puffer")) ||
-        !ProcessClass__is_service(caller->process_class) ||
+        !ProcessClass__is_service(caller->scheduling.process_class) ||
         !Process__has_capability(caller, PROCESS_CAP_MANAGE_SHARED_PAGES) ||
         (self->manager != 0 && self->manager != caller->pid))
     {
@@ -88,7 +88,7 @@ static Result(Address) Buffers__register(BuffersPtr self, SchedulerPtr scheduler
     }
     Kernel__memset(self->notifications.kernel_addr.virtual_addr, 0, PAGE_SIZE);
     match_result(
-        PageTable__try_map_shared(&caller->page_table, caller->kernel, self->notifications, PAGE_SIZE),
+        PageTable__try_map_shared(&caller->address_space.page_table, caller->kernel, self->notifications, PAGE_SIZE),
         success_do_nothing(),
         error(code, message)
         {
@@ -125,7 +125,7 @@ static Result(BufferStatus)
             UserAddress mapping = self->memory;
             mapping.write = write;
             match_result(
-                PageTable__try_map_shared(&process->page_table, process->kernel, mapping, BUFFER_SIZE),
+                PageTable__try_map_shared(&process->address_space.page_table, process->kernel, mapping, BUFFER_SIZE),
                 success(code)
                 {
                     return Success(BufferStatus, BUFFER_OK);
@@ -153,7 +153,8 @@ static void Buffers__unmap(ManagedBufferPtr self, SchedulerPtr scheduler, Buffer
         Scheduler__find_process_by_pid_locked(scheduler, pid),
         some(process)
         {
-            PageTable__unmap(&process->page_table, process->kernel, self->memory.virtual_addr, BUFFER_SIZE);
+            PageTable__unmap(&process->address_space.page_table, process->kernel, self->memory.virtual_addr,
+                             BUFFER_SIZE);
         },
         none_do_nothing()
     );
@@ -193,7 +194,7 @@ static Result(Address)
         Scheduler__find_process_by_pid_locked(scheduler, client),
         some(process)
         {
-            buffer->retained = ProcessClass__is_service(process->process_class);
+            buffer->retained = ProcessClass__is_service(process->scheduling.process_class);
         },
         none()
         {
@@ -227,7 +228,7 @@ static Result(Address) Buffers__create(BuffersPtr self, SchedulerPtr scheduler, 
         Scheduler__find_process_by_pid_locked(scheduler, server),
         some(process)
         {
-            if (!ProcessClass__is_service(process->process_class) ||
+            if (!ProcessClass__is_service(process->scheduling.process_class) ||
                 !Process__has_capability(process, PROCESS_CAP_MANAGE_SHARED_PAGES))
             {
                 return Error(Address, buffer_error, BUFFER_DENIED);
@@ -502,8 +503,8 @@ void Buffers__exit(BuffersPtr self, SchedulerPtr scheduler, ProcessPtr process)
                     if (buffer->memory.valid &&
                         (buffer->client == process->pid || buffer->server == process->pid))
                     {
-                        PageTable__unmap(&process->page_table, process->kernel, buffer->memory.virtual_addr,
-                                         BUFFER_SIZE);
+                        PageTable__unmap(&process->address_space.page_table, process->kernel,
+                                         buffer->memory.virtual_addr, BUFFER_SIZE);
                         if (buffer->client == process->pid)
                         {
                             buffer->client = 0;
@@ -522,7 +523,7 @@ void Buffers__exit(BuffersPtr self, SchedulerPtr scheduler, ProcessPtr process)
     );
     if (self->manager == process->pid)
     {
-        PageTable__unmap(&process->page_table, process->kernel, BUFFER_EVENTS_ADDRESS, PAGE_SIZE);
+        PageTable__unmap(&process->address_space.page_table, process->kernel, BUFFER_EVENTS_ADDRESS, PAGE_SIZE);
         self->manager = 0;
     }
 }

@@ -12,7 +12,7 @@ exec "$vendor_dir/configure" \
     --disable-multilib \
     --disable-nls \
     --disable-newlib-supplied-syscalls \
-    --disable-newlib-multithread \
+    --enable-newlib-multithread \
     --disable-newlib-io-float \
     --disable-newlib-io-long-double \
     --disable-newlib-wide-orient \

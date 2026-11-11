@@ -3,6 +3,8 @@
 Start with the repository [README](../README.md) for prerequisites, building,
 and tests. [Goals](GOALS.md) describes project direction; [TODO](TODO.md) records
 agreed unfinished work and open questions.
+[Intermittent issues](INTERMITTENT_ISSUES.md) records runtime failures, retained
+evidence, explicit deferrals, and unresolved validation gaps.
 
 ## Kernel
 

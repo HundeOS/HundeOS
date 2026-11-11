@@ -21,7 +21,7 @@ void tearDown(void)
 void test_panic_handler_triggers_kernel_panic(void)
 {
     match_result(
-        Panic__handler(kernel, &None(ProcessPtr), 0, 0, 0, 0, 0),
+        Panic__handler(kernel, &None(ProcessPtr), 0, 0, 0, 0, 0, &None(ThreadPtr)),
         success_test_fail(),
         error(code, message)
         {
@@ -40,7 +40,7 @@ void test_init_registers_panic_syscall(void)
     );
 
     match_result(
-        SyscallDispatcher__dispatch(&kernel->syscall_dispatcher, kernel, &None(ProcessPtr), SYSCALL_PANIC, 0, 0, 0, 0,
+        SyscallDispatcher__dispatch(&kernel->syscall_dispatcher, kernel, &None(ThreadPtr), SYSCALL_PANIC, 0, 0, 0, 0,
                                     0),
         success_test_fail(),
         error(code, message)

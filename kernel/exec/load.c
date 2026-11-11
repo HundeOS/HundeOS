@@ -23,7 +23,7 @@ static BString ExecLoad__requested_path(ExecLoadPtr self)
 
 static void ExecLoad__dispose_finished(ProcessPtr process, ExecLoadPtr load)
 {
-    process->exec_load = None(ExecLoadPtr);
+    process->image.exec_load = None(ExecLoadPtr);
     if (load->buffer.valid)
     {
         Kernel__free(load->buffer.virtual_addr);
@@ -104,7 +104,7 @@ Result(ProcessPtr)
         context->process,
         some(process)
         {
-            if (!is_nothing(process->exec_load))
+            if (!is_nothing(process->image.exec_load))
             {
                 return Error(ProcessPtr, load_failed, SPAWN_FAILED);
             }
@@ -127,7 +127,7 @@ Result(ProcessPtr)
                         {
                             *load = ExecLoad__new(channel, context, path, wait, user, arguments, stdio,
                                                   abort_report, overlay, overlay_payload);
-                            process->exec_load = Some(ExecLoadPtr, load);
+                            process->image.exec_load = Some(ExecLoadPtr, load);
                         },
                         error(code, message)
                         {
@@ -342,7 +342,7 @@ static Result(ChannelCode) ExecLoad__step(ExecLoadPtr self, SchedulerPtr schedul
 void ExecLoad__cancel(ProcessPtr process)
 {
     match_optional(
-        process->exec_load,
+        process->image.exec_load,
         some(load)
         {
             SchedulerPtr scheduler = process->kernel->scheduler;
@@ -361,7 +361,7 @@ void ExecLoad__cancel(ProcessPtr process)
             {
                 Kernel__free(load->overlay_payload.virtual_addr);
             }
-            process->exec_load = None(ExecLoadPtr);
+            process->image.exec_load = None(ExecLoadPtr);
             Kernel__free((Address)load);
         },
         none_do_nothing()
@@ -371,7 +371,7 @@ void ExecLoad__cancel(ProcessPtr process)
 Result(ProcessPtr) ExecLoad__continue(ProcessPtr process)
 {
     match_optional(
-        process->exec_load,
+        process->image.exec_load,
         some(load)
         {
             SchedulerPtr scheduler = process->kernel->scheduler;
@@ -462,7 +462,7 @@ Result(ProcessPtr) ExecLoad__continue(ProcessPtr process)
                     }
                 );
             }
-            process->exec_load = None(ExecLoadPtr);
+            process->image.exec_load = None(ExecLoadPtr);
             KernelAddress overlay_payload = load->overlay_payload;
             Result(ProcessPtr) result =
                 Exec__launch_loaded_elf(&load->context, &elf, load->wait, &load->user, &load->arguments, &load->stdio,
@@ -484,7 +484,7 @@ Result(ProcessPtr) ExecLoad__continue(ProcessPtr process)
 bool ExecLoad__ready(ProcessPtr process)
 {
     match_optional(
-        process->exec_load,
+        process->image.exec_load,
         some(load)
         {
             if (!load->observation_valid)

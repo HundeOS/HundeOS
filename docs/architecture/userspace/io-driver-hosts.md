@@ -141,7 +141,8 @@ The loading and language contract is defined in
 The following component sections retain the staged implementation details.
 Early slice descriptions and ABI-version introductions are historical context;
 the status above and the current dispatch section describe the running topology.
-The current I/O component ABI is v6; lifecycle components use ABI v1.
+The current I/O component ABI is v7, adding generic advance/deadline scheduling
+for [localhost networking](localhost.md); lifecycle components use ABI v1.
 
 ### Rust driver host: VirtIO block
 
@@ -152,8 +153,14 @@ sequence validation, pending replies, local IRQ dispatch, and the polling/wait
 loop. Bootstrap launches `/sbin/services/hunde-treiber-host`; external drivers
 retain the `hund-unterbrict` Channel endpoint and wire protocol.
 
-`user/lib/hunde/driver.c` and `hunde::driver` adapt native Channel,
-notification, and interrupt-controller operations. The host crate forbids unsafe
+Manifest `polled-driver` entries select additional approved driver Wuffs without
+hardware-specific host startup branches. They receive their configured name as
+load configuration and must advertise no IRQ. The paired dummy Ethernet Wuff
+uses this path; see [packet drivers](packet-drivers.md).
+
+`hunde::channel` and `channel_native.c` adapt common Channel/listener operations;
+`user/lib/hunde/driver.c` and `hunde::driver` adapt notifications and
+interrupt-controller operations. The host crate forbids unsafe
 Rust. Each `virtio_blk.wuff` instance owns its device registers, DMA queue,
 transfer state, and acknowledgement. Shared `hunde` MMIO/DMA wrappers and the
 native block-server/fibre adapter provide the unsafe and C ABI boundary.
@@ -234,7 +241,7 @@ startup, the fibre scheduler loop, loaded component lifetimes, endpoint
 registration, readiness publication, callback dispatch, and Future polling.
 There is no host-specific C launcher or dispatcher. During startup it loads
 `/sbin/components/socket.wuff` through the
-existing filesystem Wuff loader and resolves `hunde_io_component_entry_v6`.
+existing filesystem Wuff loader and resolves `hunde_io_component_entry_v7`.
 The trusted Rust module owns socket names, listeners, connection handles,
 bounded byte queues, permissions, backpressure, EOF, and session cleanup.
 It remains resident until the host exits; runtime unloading is not supported.
@@ -289,9 +296,9 @@ I/O ABI v4 adds process-accounting and kernel-trace callbacks to the host table.
 Only `hunde` translates native registry records into checked, pointer-free ABI
 snapshots. Services never access raw shared mappings or use unsafe Rust.
 I/O ABI v5 added a dedicated file-change completion record without changing
-the v4 request fields. The current ABI is v6: it adds a checked boot-information
+the v4 request fields. ABI v6 added a checked boot-information
 snapshot callback to the host table for the cached Rust `sysinfofs.wuff`.
-The resident components all export `hunde_io_component_entry_v6`; older I/O
+The resident components all export `hunde_io_component_entry_v7`; older I/O
 descriptors are rejected rather than interpreting a different host layout.
 See [Process registry and procfs](process-registry-and-procfs.md).
 
@@ -634,7 +641,7 @@ implements the existing `IoComponent` dispatch/disconnect interface without
 requiring a fake default filesystem or hard-coded device path. `IoComponent`
 itself no longer requires `Default`; the existing default-entry loader still
 does. Socket/pipe/memfs/procfs still use the default-entry loader; their current
-entries use ABI v6, retaining the file-change completion record introduced in v5.
+entries use ABI v7, retaining the file-change completion record introduced in v5.
 
 The adapter consumes the shared `Request`, `Operation`, `Reply`, `FileInfo`,
 directory-entry, owner, and grant types. Path operations obtain credentials
@@ -775,7 +782,7 @@ scan-resistance and failure coverage.
 #### EXT2 Wuff mount boundary
 
 `ext2fs.wuff` exports only `hunde_filesystem_component_entry_v1(host, block)`.
-The common host table and returned I/O descriptor now use ABI v6; the explicit
+The common host table and returned I/O descriptor now use ABI v7; the explicit
 filesystem mount entry remains v1 and validates that host version. A separate ABI-v1
 `HundeBlockHostOperationsV1` table contains an opaque device context, a count
 of 512-byte sectors, and exact-transfer read/write callbacks. The shared C
@@ -965,7 +972,7 @@ still attach directly to the selected endpoint; this slice does not unify
 backend handle spaces or remove open-time redirects. External bootstrap,
 device, and FAT32 providers remain mounted by endpoint. No internal forwarding
 Channel is introduced. The native service callback envelope carries bounded
-redirects separately from the Wuff I/O completion, whose layout is unchanged in v6.
+redirects separately from the Wuff I/O completion, whose layout is unchanged in v7.
 
 The host registers its application router through `hunde::service::LocalPathRouter`.
 Its Wuff loader uses that router and the same namespace tree directly rather
@@ -1067,7 +1074,7 @@ timeouts.
 The application endpoint opts into resource-serving buffer preparation, so its
 initial open/pipe/claim can return a host handle and normal buffer descriptors
 without a redirect round trip. This dispatch change preserves the wire protocol
-and Wuff completion layout; the current host ABI is v6.
+and Wuff completion layout; the current host ABI is v7.
 Existing component endpoints remain temporary compatibility/readiness aliases;
 normal hosted I/O no longer uses them. Bootstrap, terminal/device, and legacy
 filesystem providers still use external redirects in this slice. Replacing those

@@ -6,11 +6,6 @@
 #include "sys/process.h"
 #include "sys/service.h"
 
-static HundeStatusResult HundeStatusResult__new_pending(void)
-{
-    return (HundeStatusResult){.kind = HUNDE_IO_PENDING};
-}
-
 typedef struct RustDriverManager
 {
     KernelNotificationQueuePtr events;
@@ -20,23 +15,11 @@ typedef struct RustDriverManager
 
 typedef RustDriverManager * RustDriverManagerPtr;
 
-typedef struct RustDriverListener
-{
-    QueueArrivalsPtr arrivals;
-} RustDriverListener;
-
-typedef RustDriverListener * RustDriverListenerPtr;
-
 static RustDriverManager RustDriverManager__new(ServiceInterruptManagerRegistrationPtr registration)
 {
     return (RustDriverManager){.events = (KernelNotificationQueuePtr)registration->event_queue,
                                .distributor = registration->distributor,
                                .registered_distributor = registration->distributor};
-}
-
-static RustDriverValue RustDriverValue__new(HundeStatusResult status, uint64_t value)
-{
-    return (RustDriverValue){.status = status, .value = value};
 }
 
 static RustDriverEvent RustDriverEvent__new(HundeStatusResult status, uint64_t irq, uint64_t sequence,
@@ -132,68 +115,6 @@ RustDriverEvent hunde_driver_event(void * storage)
         none_do_nothing()
     );
     return RustDriverEvent__new(HundeStatusResult__new_pending(), 0, 0, 0, 0);
-}
-
-RustNativeLayout hunde_driver_listener_layout(void)
-{
-    return RustNativeLayout__new(sizeof(RustDriverListener), _Alignof(RustDriverListener));
-}
-
-HundeStatusResult hunde_driver_listen(void * storage, HundeByteSpan name)
-{
-    RustDriverListenerPtr self = storage;
-    BString service = BString__from_chars((const char *)name.bytes, name.length);
-    match_result(
-        Queue__listen(&service),
-        success(arrivals)
-        {
-            self->arrivals = arrivals;
-            return HundeStatusResult__success();
-        },
-        error(code, message)
-        {
-            return RustNative__error(code);
-        }
-    );
-    return RustNative__unknown_error();
-}
-
-RustDriverValue hunde_driver_arrival(void * storage, uint64_t index)
-{
-    RustDriverListenerPtr self = storage;
-    match_optional(
-        QueueConnectionSlots__at(&self->arrivals->connections, index),
-        some(connection)
-        {
-            return RustDriverValue__new(HundeStatusResult__success(), connection);
-        },
-        none_do_nothing()
-    );
-    return RustDriverValue__new(HundeStatusResult__new_pending(), 0);
-}
-
-RustNativeLayout hunde_driver_client_layout(void)
-{
-    return RustNativeLayout__new(sizeof(ChannelServer), _Alignof(ChannelServer));
-}
-
-HundeStatusResult hunde_driver_accept(void * storage, uint64_t connection)
-{
-    ChannelServerPtr self = storage;
-    match_result(
-        ChannelServer__accept(connection),
-        success(channel)
-        {
-            *self = channel;
-            return HundeStatusResult__success();
-        },
-        error(code, message)
-        {
-            QueueConnection__close(connection);
-            return RustNative__error(code);
-        }
-    );
-    return RustNative__unknown_error();
 }
 
 uint64_t hunde_driver_client_pid(void * storage)

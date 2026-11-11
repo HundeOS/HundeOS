@@ -26,8 +26,8 @@ FixedArrayBodyDefine(ManagedSharedPages);
 #define CPU_SCHEDULER_INIT(idle, cpu)                                                                                  \
     (CPUScheduler)                                                                                                     \
     {                                                                                                                  \
-        .idle_process = idle, .processes = EmptyArray(ProcessTable), .scheduler_lock = MUTEX_INIT, .last_tick = 0,     \
-        .cpu = cpu, .registry_slot = 0, .started = false,                                                              \
+        .idle_process = idle, .processes = EmptyArray(ProcessTable), .threads = EmptyArray(ThreadTable),               \
+        .scheduler_lock = MUTEX_INIT, .last_tick = 0, .cpu = cpu, .registry_slot = 0, .started = false,                \
     }
 
 BString unknown_error = bstr("Unknown error\n");
@@ -58,6 +58,8 @@ static Result(ServiceCode)
     Scheduler__service_ready_mark_runnable_locked(SchedulerPtr self, ProcessPtr process, ServiceCode result);
 static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerPtr self, ProcessPtr parent,
                                                                       ProcessPtr child, ReturnCode return_code);
+static bool Scheduler__is_parked_for(SchedulerPtr self, ProcessPtr proc, ParkReason reason);
+static ProcessTimes Scheduler__process_times_at(ProcessPtr process, CPUTime now);
 static Result(ServiceCode)
     Scheduler__notify_parent_child_state_locked(SchedulerPtr self, ProcessPtr parent, ProcessPtr child,
                                                 uint64_t event_type, ProcessSignal signal);
@@ -74,7 +76,7 @@ static Result(ProcessPtr)
 static Optional(ProcessPtr) Scheduler__current_process_locked(SchedulerPtr self, CPUID cpu);
 static ProcessTable Scheduler__all_processes_for_all_cpus_locked(SchedulerPtr self);
 static ProcessTable Scheduler__process_snapshot_locked(SchedulerPtr self);
-static bool Scheduler__queue_wait_changed(ProcessPtr process);
+static bool Scheduler__queue_wait_changed(ThreadPtr thread);
 
 #ifdef KERNEL_COMMAND_TRACE
 static bool Scheduler__command_flow_process(ProcessPtr process)
@@ -90,7 +92,7 @@ static void Scheduler__trace_queue_data_available(ProcessPtr process, ProcessPtr
         __d_printf(COMMAND_FLOW,
                    "t=%i queue sender=%i:%s receiver=%i:%s receiver_state=%s wake=%i cpu=%i connection=%i\n",
                    CPU__time_usec(), process->pid, cstr(process->name), peer->pid, cstr(peer->name),
-                   ProcessState__to_string(peer->state), reschedule, cpu, connection);
+                   ProcessState__to_string(peer->thread.state), reschedule, cpu, connection);
     }
 }
 
@@ -101,7 +103,7 @@ static void Scheduler__trace_child_exit(ProcessPtr parent, ProcessPtr child, Con
     {
         __d_printf(COMMAND_FLOW, "t=%i child-exit child=%i:%s parent=%i:%s parent_state=%s status=%i retained=%i\n",
                    CPU__time_usec(), child->pid, cstr(child->name), parent->pid, cstr(parent->name),
-                   ProcessState__to_string(parent->state), event->status, retains_child_event);
+                   ProcessState__to_string(parent->thread.state), event->status, retains_child_event);
     }
 }
 
@@ -111,7 +113,7 @@ static void Scheduler__trace_child_wake(ProcessPtr process, ProcessID child_pid,
     {
         __d_printf(COMMAND_FLOW, "t=%i child-wake parent=%i:%s child=%i event=%i wait_ready=%i state=%s\n",
                    CPU__time_usec(), process->pid, cstr(process->name), child_pid, event_type, wait_ready,
-                   ProcessState__to_string(process->state));
+                   ProcessState__to_string(process->thread.state));
     }
 }
 #else
@@ -178,7 +180,7 @@ static bool Scheduler__shared_address_available(ProcessPtr process, Address addr
 {
     for_each_ll(
         UserAllocations,
-        process->user_allocations,
+        process->address_space.user_allocations,
         allocation,
         {
             Address start = allocation.address.virtual_addr;
@@ -202,7 +204,8 @@ static void Scheduler__unmap_shared_peer_locked(SchedulerPtr self, ProcessID pid
         Scheduler__find_process_by_pid_locked(self, pid),
         some(process)
         {
-            PageTable__unmap(&process->page_table, process->kernel, address.virtual_addr, MEM_SHARED_PAGE_SIZE);
+            PageTable__unmap(&process->address_space.page_table, process->kernel, address.virtual_addr,
+                             MEM_SHARED_PAGE_SIZE);
         },
         none_do_nothing()
     );
@@ -246,8 +249,8 @@ static Result(MemStatus) Scheduler__shared_pages_exit_locked(SchedulerPtr self, 
                     {
                         continue;
                     }
-                    PageTable__unmap(&process->page_table, process->kernel, page->address.virtual_addr,
-                                     MEM_SHARED_PAGE_SIZE);
+                    PageTable__unmap(&process->address_space.page_table, process->kernel,
+                                     page->address.virtual_addr, MEM_SHARED_PAGE_SIZE);
                     if (page->owner_pid == process->pid)
                     {
                         match_result(
@@ -326,19 +329,21 @@ static Result(Address) Scheduler__alloc_shared_page_locked(SchedulerPtr self, Pr
                         success(address)
                         {
                             Kernel__memset(address.kernel_addr.virtual_addr, 0, MEM_SHARED_PAGE_SIZE);
-                            PageTable__map_shared(&owner->page_table, owner->kernel, address, MEM_SHARED_PAGE_SIZE);
+                            PageTable__map_shared(&owner->address_space.page_table, owner->kernel, address,
+                                                  MEM_SHARED_PAGE_SIZE);
                             ProcessID first_pid = QUEUE_KERNEL_PID;
                             match_optional(
                                 *first,
                                 some(process)
                                 {
                                     first_pid = process->pid;
-                                    PageTable__map_shared(&process->page_table, process->kernel, address,
+                                    PageTable__map_shared(&process->address_space.page_table, process->kernel, address,
                                                           MEM_SHARED_PAGE_SIZE);
                                 },
                                 none_do_nothing()
                             );
-                            PageTable__map_shared(&second->page_table, second->kernel, address, MEM_SHARED_PAGE_SIZE);
+                            PageTable__map_shared(&second->address_space.page_table, second->kernel, address,
+                                                  MEM_SHARED_PAGE_SIZE);
                             *page = ManagedSharedPage__new(address, owner->pid, first_pid, second->pid);
                             page->generation = ++self->shared_page_generation;
                             return Success(Address, virtual_address);
@@ -360,7 +365,7 @@ Result(Address)
     Scheduler__alloc_shared_page(SchedulerPtr self, ProcessPtr owner, ProcessID first_peer, ProcessID second_peer)
 {
     if (!Process__has_capability(owner, PROCESS_CAP_MANAGE_SHARED_PAGES) ||
-        !ProcessClass__is_service(owner->process_class))
+        !ProcessClass__is_service(owner->scheduling.process_class))
     {
         return Error(Address, shared_memory_error, MEM_PERMISSION_DENIED);
     }
@@ -450,7 +455,8 @@ Result(MemStatus) Scheduler__release_shared_page(SchedulerPtr self, ProcessPtr o
     return Error(MemStatus, shared_memory_error, MEM_INVALID_ADDRESS);
 }
 
-static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, CPUSchedulerPtr cpu, ProcessPtr process);
+static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, CPUSchedulerPtr cpu, ProcessPtr process,
+                                                            ReturnCode return_code);
 
 Result(Address) Scheduler__queue_listen(SchedulerPtr self, ProcessPtr process, Address name)
 {
@@ -574,21 +580,94 @@ Result(Address) Scheduler__queue_cancel_delegation(SchedulerPtr self, ProcessPtr
     return Error(Address, bstr("Queue delegation cancellation failed"), QUEUE_INVALID);
 }
 
+static bool Scheduler__process_has_runnable_thread_locked(SchedulerPtr self, ProcessPtr process)
+{
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu,
+        scheduler,
+        {
+            for_each_fa(
+                ThreadTable,
+                scheduler->threads,
+                thread_index,
+                thread,
+                {
+                    if (thread->owner == process && (thread->state == PROC_STATE_READY ||
+                                                     thread->state == PROC_STATE_INTERRUPTED))
+                    {
+                        return true;
+                    }
+                }
+            );
+        }
+    );
+    return false;
+}
+
+typedef struct QueueWaitWake
+{
+    bool had_ready_waiter;
+    bool woke_waiter;
+} QueueWaitWake;
+
+static QueueWaitWake QueueWaitWake__new(void)
+{
+    return (QueueWaitWake){.had_ready_waiter = false, .woke_waiter = false};
+}
+
+static QueueWaitWake Scheduler__wake_kernel_queue_waiters_locked(SchedulerPtr self, ProcessPtr process)
+{
+    QueueWaitWake wake = QueueWaitWake__new();
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu,
+        scheduler,
+        {
+            for_each_fa(
+                ThreadTable,
+                scheduler->threads,
+                thread_index,
+                thread,
+                {
+                    if (thread->owner != process)
+                    {
+                        continue;
+                    }
+                    if (Thread__has_ready_parked_operation(thread, PARK_WAIT_QUEUE, &None(OperationKey)))
+                    {
+                        wake.had_ready_waiter = true;
+                    }
+                    if (thread->state == PROC_STATE_WAITING &&
+                        Thread__has_parked_operation(thread, PARK_WAIT_QUEUE, &None(OperationKey)) &&
+                        Thread__kernel_queue_wait_ready(thread) &&
+                        Thread__mark_parked_operation_ready(thread, PARK_WAIT_QUEUE, &None(OperationKey),
+                                                            &Some(ReturnCode, QUEUE_WAIT_CHANGED)))
+                    {
+                        thread->state = PROC_STATE_INTERRUPTED;
+                        QueueWaitUsage__wake(&thread->queue_wait_usage, QUEUE_WAIT_CHANGED);
+                        Thread__clear_kernel_queue_wait(thread);
+                        wake.woke_waiter = true;
+                    }
+                }
+            );
+        }
+    );
+    return wake;
+}
+
 static Result(SchedulerWake) Scheduler__wake_shared_wait_locked(SchedulerPtr self, ProcessPtr process)
 {
     bool userspace_waiting = Process__shared_wait_armed(process);
     Process__wake_shared_wait(process);
-    bool parked_waiting = process->state == PROC_STATE_WAITING &&
-                          Process__has_parked_operation(process, PARK_WAIT_QUEUE, &None(OperationKey)) &&
-                          Scheduler__queue_wait_changed(process);
-    if (parked_waiting && Process__mark_parked_operation_ready(process, PARK_WAIT_QUEUE, &None(OperationKey),
-                                                               &Some(ReturnCode, QUEUE_WAIT_CHANGED)))
-    {
-        process->state = PROC_STATE_INTERRUPTED;
-        QueueWaitUsage__wake(&process->queue_wait_usage, QUEUE_WAIT_CHANGED);
-        Process__clear_kernel_queue_wait(process);
-    }
-    else if (!userspace_waiting || (process->state != PROC_STATE_READY && process->state != PROC_STATE_INTERRUPTED))
+    QueueWaitWake wake = Scheduler__wake_kernel_queue_waiters_locked(self, process);
+    if ((!userspace_waiting && !wake.woke_waiter) || !Scheduler__process_has_runnable_thread_locked(self, process))
     {
         return Success(SchedulerWake, SchedulerWake__new(false, 0));
     }
@@ -606,21 +685,9 @@ static Result(SchedulerWake) Scheduler__wake_shared_wait_locked(SchedulerPtr sel
 
 static Result(SchedulerWake) Scheduler__wake_queue_wait_locked(SchedulerPtr self, ProcessPtr process)
 {
-    bool parked_waiting = process->state == PROC_STATE_WAITING &&
-                          Process__has_parked_operation(process, PARK_WAIT_QUEUE, &None(OperationKey)) &&
-                          Scheduler__queue_wait_changed(process);
-    bool completed_queue_wait = process->state == PROC_STATE_INTERRUPTED &&
-                                Process__has_ready_parked_operation(process, PARK_WAIT_QUEUE, &None(OperationKey));
-    if (parked_waiting && Process__mark_parked_operation_ready(process, PARK_WAIT_QUEUE, &None(OperationKey),
-                                                               &Some(ReturnCode, QUEUE_WAIT_CHANGED)))
-    {
-        process->state = PROC_STATE_INTERRUPTED;
-        QueueWaitUsage__wake(&process->queue_wait_usage, QUEUE_WAIT_CHANGED);
-        Process__clear_kernel_queue_wait(process);
-    }
-    else if (!Process__has_pending_messages(process) ||
-             (process->state != PROC_STATE_READY && process->state != PROC_STATE_INTERRUPTED) ||
-             (completed_queue_wait && CPU__count() != 1))
+    QueueWaitWake wake = Scheduler__wake_kernel_queue_waiters_locked(self, process);
+    if (!Process__has_pending_messages(process) || !Scheduler__process_has_runnable_thread_locked(self, process) ||
+        (wake.had_ready_waiter && !wake.woke_waiter && CPU__count() != 1))
     {
         return Success(SchedulerWake, SchedulerWake__new(false, 0));
     }
@@ -684,7 +751,7 @@ Result(SchedulerWake)
 
 static Tick CPUScheduler__sleep_ticks_from_usec(uint64_t usec)
 {
-    Tick ticks = (usec + 999ULL) / 1000ULL;
+    Tick ticks = usec / PROCESS_CPU_TICK_USEC + (usec % PROCESS_CPU_TICK_USEC != 0);
     return ticks == 0 ? 1 : ticks;
 }
 
@@ -692,12 +759,20 @@ static void CPUScheduler__wake_expired_sleepers(CPUSchedulerPtr self)
 {
     uint64_t now_usec = CPU__time_usec();
     for_each_fa(
+        ThreadTable,
+        self->threads,
+        thread_index,
+        thread,
+        {
+            Thread__wake_expired_sleep(thread, self->last_tick);
+        }
+    );
+    for_each_fa(
         ProcessTable,
         self->processes,
         index,
         proc,
         {
-            Process__wake_expired_sleep(proc, self->last_tick);
             if (Process__take_expired_alarm(proc, now_usec))
             {
                 Process__queue_signal(proc, PROCESS_SIGNAL_ALARM);
@@ -733,26 +808,30 @@ Result(CPUSchedulerPtr) CPUScheduler__heap_new(KernelPtr kernel, Elf idle_proces
     );
 }
 
-bool process_in_state(ProcessPtr * proc, void * compare_state)
+static bool thread_in_state(ThreadPtr * thread, void * compare_state)
 {
-    ProcessState state = (*proc)->state;
+    ProcessState state = (*thread)->state;
     ProcessState compare = *(ProcessStatePtr)compare_state;
-    __d_printf(SCHEDULER, "process_in_state %s %s\n", cstr((*proc)->name), ProcessState__to_string(state));
+    __d_printf(SCHEDULER, "thread_in_state %s %s\n", cstr((*thread)->owner->name), ProcessState__to_string(state));
 
     return state & compare;
 }
 
-static bool CPUScheduler__can_resume(ProcessPtr * process, void * context)
+static bool CPUScheduler__can_resume(ThreadPtr * thread, void * context)
 {
-    ProcessPtr proc = *process;
-    switch (proc->state)
+    ProcessPtr proc = (*thread)->owner;
+    if (proc->lifecycle.terminating)
+    {
+        return false;
+    }
+    switch ((*thread)->state)
     {
     case PROC_STATE_READY:
     case PROC_STATE_INTERRUPTED:
-        return Process__shared_wait_ready(proc);
+        return Thread__shared_wait_ready(*thread);
     case PROC_STATE_WAITING:
     case PROC_STATE_SLEEPING:
-        return Process__can_resume_for_signal(proc);
+        return Thread__can_resume_for_signal(*thread);
     case PROC_STATE_STOPPED:
         return Process__has_pending_resume_signal(proc);
     default:
@@ -779,21 +858,34 @@ static void CPUScheduler__publish_processes(CPUSchedulerPtr self)
             KernelProcessRegistry__set(registry, self->registry_slot, count++, &record);
         }
     );
+
     KernelProcessRegistry__set_count(registry, self->registry_slot, count);
     self->last_registry_sample_usec = CPU__time_usec();
 }
 
 static Result(CPUID) CPUScheduler__schedule(CPUSchedulerPtr self, ProcessPtr new_proc)
 {
-    __d_printf(SCHEDULER, "Queuing %s %s\n", cstr(new_proc->name), ProcessState__to_string(new_proc->state));
+    __d_printf(SCHEDULER, "Queuing %s %s\n", cstr(new_proc->name), ProcessState__to_string(new_proc->thread.state));
     match_result(
-        ProcessTable__push(&self->processes, new_proc),
+        ThreadTable__push(&self->threads, &new_proc->thread),
         success(index)
         {
-            new_proc->state = PROC_STATE_READY;
-            __d_printf(SCHEDULER, "%s %s\n", cstr(new_proc->name), ProcessState__to_string(new_proc->state));
-            CPUScheduler__publish_processes(self);
-            return Success(CPUID, self->cpu);
+            match_result(
+                ProcessTable__push(&self->processes, new_proc),
+                success(process_index)
+                {
+                    new_proc->thread.state = PROC_STATE_READY;
+                    __d_printf(SCHEDULER, "%s %s\n", cstr(new_proc->name),
+                               ProcessState__to_string(new_proc->thread.state));
+                    CPUScheduler__publish_processes(self);
+                    return Success(CPUID, self->cpu);
+                },
+                error(code, message)
+                {
+                    ThreadTable__remove(&self->threads, &new_proc->thread);
+                    return Error(CPUID, message, code);
+                }
+            );
         },
         error(code, message)
         {
@@ -828,14 +920,14 @@ static Optional(ProcessPtr) Scheduler__take_admitted(SchedulerPtr self, CPUSched
     return None(ProcessPtr);
 }
 
-int longest_waiting(ProcessPtr * proc1, ProcessPtr * proc2)
+static int longest_waiting(ThreadPtr * first, ThreadPtr * second)
 {
-    if ((*proc2)->last_tick > (*proc1)->last_tick)
+    if ((*second)->last_tick > (*first)->last_tick)
     {
         return 1;
     }
 
-    if ((*proc2)->last_tick < (*proc1)->last_tick)
+    if ((*second)->last_tick < (*first)->last_tick)
     {
         return -1;
     }
@@ -843,10 +935,10 @@ int longest_waiting(ProcessPtr * proc1, ProcessPtr * proc2)
     return 0;
 }
 
-int service_priority_then_longest_waiting(ProcessPtr * proc1, ProcessPtr * proc2)
+static int service_priority_then_longest_waiting(ThreadPtr * first, ThreadPtr * second)
 {
-    uint64_t proc1_priority = ProcessClass__priority((*proc1)->process_class);
-    uint64_t proc2_priority = ProcessClass__priority((*proc2)->process_class);
+    ProcessPriority proc1_priority = ProcessClass__priority((*first)->owner->scheduling.process_class);
+    ProcessPriority proc2_priority = ProcessClass__priority((*second)->owner->scheduling.process_class);
 
     if (proc1_priority > proc2_priority)
     {
@@ -858,22 +950,22 @@ int service_priority_then_longest_waiting(ProcessPtr * proc1, ProcessPtr * proc2
         return -1;
     }
 
-    return longest_waiting(proc1, proc2);
+    return longest_waiting(first, second);
 }
 
-static bool process_has_pending_messages(ProcessPtr * process, void * context)
+static bool thread_has_pending_messages(ThreadPtr * thread, void * context)
 {
-    return Process__has_pending_messages(*process);
+    return Process__has_pending_messages((*thread)->owner);
 }
 
-static Optional(ProcessPtr) CPUScheduler__select_ready(CPUSchedulerPtr self)
+static Optional(ThreadPtr) CPUScheduler__select_ready(CPUSchedulerPtr self)
 {
     SchedulerPtr scheduler = self->idle_process->kernel->scheduler;
     match_optional(
         Scheduler__take_preferred(scheduler, self),
         some(process)
         {
-            return Some(ProcessPtr, process);
+            return Some(ThreadPtr, &process->thread);
         },
         none_do_nothing()
     );
@@ -881,15 +973,15 @@ static Optional(ProcessPtr) CPUScheduler__select_ready(CPUSchedulerPtr self)
         Scheduler__take_admitted(scheduler, self),
         some(process)
         {
-            return Some(ProcessPtr, process);
+            return Some(ThreadPtr, &process->thread);
         },
         none_do_nothing()
     );
-    ProcessTable ready = ProcessTable__filter(&self->processes, CPUScheduler__can_resume, self);
-    ProcessTable receivers = ProcessTable__filter(&ready, process_has_pending_messages, self);
-    ProcessTable sorted = ProcessTable__sort_desc(ProcessTable__len(&receivers) != 0 ? &receivers : &ready,
-                                                  service_priority_then_longest_waiting);
-    return ProcessTable__at(&sorted, 0);
+    ThreadTable ready = ThreadTable__filter(&self->threads, CPUScheduler__can_resume, self);
+    ThreadTable receivers = ThreadTable__filter(&ready, thread_has_pending_messages, self);
+    ThreadTable sorted = ThreadTable__sort_desc(ThreadTable__len(&receivers) != 0 ? &receivers : &ready,
+                                                service_priority_then_longest_waiting);
+    return ThreadTable__at(&sorted, 0);
 }
 
 typedef struct SpeculativeWaitCandidate
@@ -905,7 +997,11 @@ OptionalDef(SpeculativeWaitCandidate);
 
 static bool Process__speculative_wait_eligible(ProcessPtr self, const OptionalPtr(ProcessPtr) current)
 {
-    bool schedulable = self->state == PROC_STATE_READY || self->state == PROC_STATE_INTERRUPTED;
+    if (self->lifecycle.terminating)
+    {
+        return false;
+    }
+    bool schedulable = self->thread.state == PROC_STATE_READY || self->thread.state == PROC_STATE_INTERRUPTED;
     match_optional(*current,
         some(process)
         {
@@ -919,7 +1015,8 @@ static bool Process__speculative_wait_eligible(ProcessPtr self, const OptionalPt
 static SpeculativeWaitCandidate SpeculativeWaitCandidate__new(SchedulerPtr scheduler, ProcessPtr process)
 {
     uint64_t now = CPU__time_usec();
-    ProcessCPUUsage usage = CPUUsage__snapshot(&process->cpu_usage, now, Process__user_wait_usec(process, now));
+    ProcessCPUUsage usage =
+        CPUUsage__snapshot(&process->accounting.cpu_usage, now, Process__user_wait_usec(process, now));
     return (SpeculativeWaitCandidate){
         .process = process,
         .dependency_weight = RequestGraph__dependency_weight(&scheduler->request_graph, process),
@@ -939,7 +1036,7 @@ static bool SpeculativeWaitCandidate__precedes(ConstSpeculativeWaitCandidatePtr 
         return self->recent_active_basis_points > other->recent_active_basis_points;
     }
 
-    return self->process->last_tick < other->process->last_tick;
+    return self->process->thread.last_tick < other->process->thread.last_tick;
 }
 
 static Optional(ProcessPtr)
@@ -979,7 +1076,7 @@ static Optional(ProcessPtr)
         selected,
         some(candidate)
         {
-            QueueWaitUsage__select_speculative(&candidate.process->queue_wait_usage);
+            QueueWaitUsage__select_speculative(&candidate.process->thread.queue_wait_usage);
             return Some(ProcessPtr, candidate.process);
         },
         none_do_nothing()
@@ -987,36 +1084,49 @@ static Optional(ProcessPtr)
     return None(ProcessPtr);
 }
 
-Optional(ProcessPtr) CPUScheduler__current_process(CPUSchedulerPtr self)
+static Optional(ThreadPtr) CPUScheduler__current_thread(CPUSchedulerPtr self)
 {
     ProcessState running_state = PROC_STATE_RUNNING;
-    FindResultOptional(ProcessTable) current_match =
-        ProcessTable__find(&self->processes, process_in_state, &running_state);
+    FindResultOptional(ThreadTable) current_match = ThreadTable__find(&self->threads, thread_in_state, &running_state);
 
     match_find_result(
         current_match,
-        some(process)
+        some(thread)
         {
-            return Some(ProcessPtr, process);
+            return Some(ThreadPtr, thread);
         },
         none()
         {
-            if (self->idle_process->state == PROC_STATE_RUNNING)
+            if (self->idle_process->thread.state == PROC_STATE_RUNNING)
             {
-                return Some(ProcessPtr, self->idle_process);
+                return Some(ThreadPtr, &self->idle_process->thread);
             }
-            return None(ProcessPtr);
+            return None(ThreadPtr);
         }
     );
 
-    return None(ProcessPtr);
+    return None(ThreadPtr);
+}
+
+Optional(ProcessPtr) CPUScheduler__current_process(CPUSchedulerPtr self)
+{
+    match_optional(
+        CPUScheduler__current_thread(self),
+        some(thread)
+        {
+            return Some(ProcessPtr, thread->owner);
+        },
+        none()
+        {
+            return None(ProcessPtr);
+        }
+    );
 }
 
 bool CPUScheduler__is_idle(CPUSchedulerPtr self)
 {
     ProcessState running_state = PROC_STATE_RUNNING;
-    FindResultOptional(ProcessTable) current_match =
-        ProcessTable__find(&self->processes, process_in_state, &running_state);
+    FindResultOptional(ThreadTable) current_match = ThreadTable__find(&self->threads, thread_in_state, &running_state);
 
     match_find_result(current_match,
         some(process)
@@ -1065,17 +1175,33 @@ Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
 
     critical_section(
         self->scheduler_lock,
-        remove_res = ProcessTable__remove(&self->processes, proc);
-    )
-    ;
+        {
+            remove_res = ProcessTable__remove(&self->processes, proc);
+            match_result(
+                remove_res,
+                success(index)
+                {
+                    if (is_something(ThreadTable__find_item(&self->threads, &proc->thread)))
+                    {
+                        remove_res = ThreadTable__remove(&self->threads, &proc->thread);
+                    }
+                },
+                error(code, message)
+                {
+                    __d_printf(SCHEDULER, "Missing scheduled process pid=%i: %s\n", proc->pid,
+                               cstr(message));
+                }
+            );
+        }
+    );
 
     match_result(
         remove_res,
         success(process_index)
         {
             CPUTime now = CPU__time_usec();
-            CPUUsage__stop(&proc->cpu_usage, now, Process__user_wait_usec(proc, now));
-            proc->state = PROC_STATE_DEAD;
+            CPUUsage__stop(&proc->accounting.cpu_usage, now, Process__user_wait_usec(proc, now));
+            proc->thread.state = PROC_STATE_DEAD;
             CPUScheduler__publish_processes(self);
             return Success(ProcessPtr, proc);
         },
@@ -1086,7 +1212,143 @@ Result(ProcessPtr) CPUScheduler__exit(CPUSchedulerPtr self, ProcessPtr proc)
     );
 }
 
-static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, CPUSchedulerPtr cpu, ProcessPtr process)
+static Result(CollectionCode) Scheduler__register_live_child_locked(SchedulerPtr self, ProcessPtr child)
+{
+    match_optional(
+        child->parent,
+        some(parent)
+        {
+            match_optional(
+                child->parent_pid,
+                some(parent_pid)
+                {
+                    match_optional(
+                        Scheduler__find_process_by_pid_locked(self, parent_pid),
+                        some(live_parent)
+                        {
+                            if (live_parent == parent)
+                            {
+                                return LiveChildren__push(&parent->live_children, child);
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                },
+                none_do_nothing()
+            );
+            child->parent = None(ProcessPtr);
+            child->parent_pid = None(ProcessID);
+        },
+        none_do_nothing()
+    );
+    return Success(CollectionCode, 0);
+}
+
+static void Scheduler__unlink_live_child_locked(ProcessPtr child)
+{
+    match_optional(
+        child->parent,
+        some(parent)
+        {
+            match_result(
+                LiveChildren__remove(&parent->live_children, child),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    __d_printf(SCHEDULER, "Missing live child pid=%i parent=%i\n", child->pid, parent->pid);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+}
+
+static void Scheduler__orphan_children_locked(ProcessPtr parent)
+{
+    while (true)
+    {
+        match_optional(
+            LiveChildren__remove_at(&parent->live_children, 0),
+            some(child)
+            {
+                child->parent = None(ProcessPtr);
+                child->parent_pid = None(ProcessID);
+            },
+            none()
+            {
+                return;
+            }
+        );
+    }
+}
+
+static Result(ServiceCode)
+    Scheduler__notify_exiting_child_locked(SchedulerPtr self, ProcessPtr child, ReturnCode return_code)
+{
+    match_optional(
+        child->parent,
+        some(parent)
+        {
+            if (!Scheduler__is_parked_for(self, parent, PARK_WAIT_CHILD))
+            {
+                return Scheduler__notify_parent_child_exit_locked(self, parent, child, return_code);
+            }
+            match_optional(
+                child->lifecycle.abort,
+                some(abort)
+                {
+                    SpawnAbortReport report =
+                        SpawnAbortReport__new(abort.reason, abort.exception_code, abort.pc, abort.fault_address);
+                    bool written = false;
+                    for_each_hashtable(
+                        CPUSchedulers,
+                        self->schedulers,
+                        bucket_index,
+                        entry_index,
+                        cpu,
+                        scheduler,
+                        {
+                            for_each_fa(
+                                ThreadTable,
+                                scheduler->threads,
+                                thread_index,
+                                thread,
+                                {
+                                    if (!written && thread->owner == parent &&
+                                        Thread__write_child_abort_report(thread, report))
+                                    {
+                                        written = true;
+                                    }
+                                }
+                            );
+                        }
+                    );
+                },
+                none_do_nothing()
+            );
+            ProcessTimes child_times = Scheduler__process_times_at(child, CPU__time_usec());
+            parent->accounting.children_user_usec += child_times.user_usec + child_times.children_user_usec;
+            parent->accounting.children_system_usec += child_times.system_usec + child_times.children_system_usec;
+            __d_printf(
+                PROGRESS,
+                "scheduler child complete child_pid=%i child_name=%s parent_pid=%i parent_name=%s return_code=%i\n",
+                child->pid, cstr(child->name), parent->pid, cstr(parent->name), return_code);
+            match_result(
+                Scheduler__unpark(self, parent, PARK_WAIT_CHILD, &Some(ReturnCode, return_code)),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(ServiceCode, message, code);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+    return Success(ServiceCode, SERVICE_OK);
+}
+
+static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, CPUSchedulerPtr cpu, ProcessPtr process,
+                                                            ReturnCode return_code)
 {
     critical_section(
         self->scheduler_lock,
@@ -1095,13 +1357,49 @@ static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, C
                 CPUScheduler__exit(cpu, process),
                 success(exited)
                 {
+                    for_each_ll(
+                        ProcessThreads,
+                        exited->threads,
+                        thread,
+                        {
+                            if (thread != &exited->thread)
+                            {
+                                for_each_hashtable(
+                                    CPUSchedulers,
+                                    self->schedulers,
+                                    bucket_index,
+                                    entry_index,
+                                    sibling_cpu,
+                                    scheduler,
+                                    {
+                                        if (is_something(ThreadTable__find_item(&scheduler->threads, thread)))
+                                        {
+                                            ThreadTable__remove(&scheduler->threads, thread);
+                                        }
+                                        match_optional(
+                                            scheduler->switching_out,
+                                            some(outgoing)
+                                            {
+                                                if (outgoing == thread)
+                                                {
+                                                    scheduler->switching_out = None(ThreadPtr);
+                                                }
+                                            },
+                                            none_do_nothing()
+                                        );
+                                    }
+                                );
+                                thread->state = PROC_STATE_DEAD;
+                            }
+                        }
+                    );
                     match_optional(
                         cpu->switching_out,
                         some(outgoing)
                         {
-                            if (outgoing == exited)
+                            if (outgoing == &exited->thread)
                             {
-                                cpu->switching_out = None(ProcessPtr);
+                                cpu->switching_out = None(ThreadPtr);
                             }
                         },
                         none_do_nothing()
@@ -1113,6 +1411,16 @@ static Result(ProcessPtr) Scheduler__detach_exiting_process(SchedulerPtr self, C
                         Scheduler__shared_pages_exit_locked(self, exited),
                         success(_)
                         {
+                            Scheduler__unlink_live_child_locked(exited);
+                            Scheduler__orphan_children_locked(exited);
+                            match_result(
+                                Scheduler__notify_exiting_child_locked(self, exited, return_code),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    cs_return(Error(ProcessPtr, message, SCHEDULER_GENERAL_ERROR));
+                                }
+                            );
                             cs_return(Success(ProcessPtr, exited));
                         },
                         error(code, message)
@@ -1138,20 +1446,59 @@ static Result(ProcessPtr)
                        OptionalPtr(OperationKey) operation_key, Anything operation_context)
 {
     __d_printf(SCHEDULER, "CPUScheduler__park %s\n", cstr(proc->name));
+    ThreadPtr thread = &proc->thread;
+    bool requested_mismatch = false;
+    bool current_matches = false;
     match_optional(
-        ProcessTable__find_item(&self->processes, proc),
+        kernel_context->thread,
+        some(requested)
+        {
+            if (requested->owner == proc)
+            {
+                thread = requested;
+            }
+            else
+            {
+                requested_mismatch = true;
+            }
+        },
+        none_do_nothing()
+    );
+    match_optional(
+        CPUScheduler__current_thread(self),
+        some(current)
+        {
+            if (current->owner == proc)
+            {
+                thread = current;
+                current_matches = true;
+            }
+        },
+        none_do_nothing()
+    );
+    if (requested_mismatch && !current_matches)
+    {
+        if (is_nothing(ProcessTable__find_item(&self->processes, proc)))
+        {
+            return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
+        }
+        return Error(ProcessPtr, bstr("Parked thread belongs to another process"), SCHEDULER_GENERAL_ERROR);
+    }
+    match_optional(
+        ThreadTable__find_item(&self->threads, thread),
         some(index)
         {
+            kernel_context->thread = Some(ThreadPtr, thread);
             ParkedOperationPtr parked = ParkedOperation__heap_new_with_context_ownership(
                 kernel_context, kernel_continuation, reason, owns_kernel_context);
             parked->operation_key = *operation_key;
             parked->operation_context = operation_context;
             CPUTime now = CPU__time_usec();
-            CPUUsage__stop(&proc->cpu_usage, now, Process__user_wait_usec(proc, now));
-            proc->state = reason == PARK_SLEEP ? PROC_STATE_SLEEPING : PROC_STATE_WAITING;
+            CPUUsage__stop(&proc->accounting.cpu_usage, now, Process__user_wait_usec(proc, now));
+            thread->state = reason == PARK_SLEEP ? PROC_STATE_SLEEPING : PROC_STATE_WAITING;
             __d_printf(SCHEDULER, "CPUScheduler__park - context %i\n", parked);
             match_result(
-                Process__push_parked_operation(proc, parked),
+                Thread__push_parked_operation(thread, parked),
                 success_do_nothing(),
                 error(code, message)
                 {
@@ -1167,14 +1514,15 @@ static Result(ProcessPtr)
     );
 }
 
-static bool Scheduler__queue_wait_changed(ProcessPtr process)
+static bool Scheduler__queue_wait_changed(ThreadPtr thread)
 {
-    return Process__kernel_queue_wait_ready(process);
+    return Thread__kernel_queue_wait_ready(thread);
 }
 
 Result(QueueWaitCode)
-    Scheduler__queue_wait(SchedulerPtr self, ProcessPtr process, IpcEventGeneration observed, Tick ticks)
+    Scheduler__queue_wait(SchedulerPtr self, ThreadPtr thread, IpcEventGeneration observed, Tick ticks)
 {
+    ProcessPtr process = thread->owner;
     if (ticks > QUEUE_WAIT_MAX_TICKS)
     {
         return Error(QueueWaitCode, bstr("Invalid queue wait bounds"), QUEUE_INVALID);
@@ -1187,7 +1535,7 @@ Result(QueueWaitCode)
             {
                 cs_return(Success(QueueWaitCode, QUEUE_WAIT_CHANGED));
             }
-            Process__arm_kernel_queue_wait(process, observed);
+            Thread__arm_kernel_queue_wait(thread, observed);
             for_each_hashtable(
                 CPUSchedulers,
                 self->schedulers,
@@ -1197,11 +1545,11 @@ Result(QueueWaitCode)
                 sched,
                 {
                     match_optional(
-                        ProcessTable__find_item(&sched->processes, process),
+                        ThreadTable__find_item(&sched->threads, thread),
                         some(index)
                         {
-                            KernelContextPtr context = KernelContext__heap_new(
-                                &Some(ProcessID, process->pid), &Some(SchedulerPtr, self));
+                            KernelContextPtr context = KernelContext__heap_new(&Some(ThreadPtr, thread),
+                                                                               &Some(SchedulerPtr, self));
                             Optional(Continuation) continuation = Some(Continuation, SystemCall__Complete);
                             Optional(OperationKey) deadline = None(OperationKey);
                             if (ticks != QUEUE_WAIT_INDEFINITE_TICKS)
@@ -1214,12 +1562,12 @@ Result(QueueWaitCode)
                                                    true, &deadline, observed),
                                 success(value)
                                 {
-                                    QueueWaitUsage__park(&process->queue_wait_usage);
+                                    QueueWaitUsage__park(&thread->queue_wait_usage);
                                     cs_return(Success(QueueWaitCode, QUEUE_WAIT_PARKED));
                                 },
                                 error(code, message)
                                 {
-                                    Process__clear_kernel_queue_wait(process);
+                                    Thread__clear_kernel_queue_wait(thread);
                                     KernelContext__dispose_heap(context);
                                     cs_return(Error(QueueWaitCode, message, code));
                                 }
@@ -1232,36 +1580,36 @@ Result(QueueWaitCode)
         }
     );
 
-    Process__clear_kernel_queue_wait(process);
+    Thread__clear_kernel_queue_wait(thread);
     return Error(QueueWaitCode, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
 static void CPUScheduler__poll_queue_waiters(SchedulerPtr self, CPUSchedulerPtr cpu)
 {
     for_each_fa(
-        ProcessTable,
-        cpu->processes,
+        ThreadTable,
+        cpu->threads,
         index,
-        process,
+        thread,
         {
-            if (process->state != PROC_STATE_WAITING ||
-                !Process__has_parked_operation(process, PARK_WAIT_QUEUE, &None(OperationKey)))
+            if (thread->state != PROC_STATE_WAITING ||
+                !Thread__has_parked_operation(thread, PARK_WAIT_QUEUE, &None(OperationKey)))
             {
                 continue;
             }
-            if (Scheduler__queue_wait_changed(process))
+            if (Scheduler__queue_wait_changed(thread))
             {
-                Process__mark_parked_operation_ready(process, PARK_WAIT_QUEUE, &None(OperationKey),
-                                                     &Some(ReturnCode, QUEUE_WAIT_CHANGED));
-                process->state = PROC_STATE_INTERRUPTED;
-                QueueWaitUsage__wake(&process->queue_wait_usage, QUEUE_WAIT_CHANGED);
-                Process__clear_kernel_queue_wait(process);
+                Thread__mark_parked_operation_ready(thread, PARK_WAIT_QUEUE, &None(OperationKey),
+                                                    &Some(ReturnCode, QUEUE_WAIT_CHANGED));
+                thread->state = PROC_STATE_INTERRUPTED;
+                QueueWaitUsage__wake(&thread->queue_wait_usage, QUEUE_WAIT_CHANGED);
+                Thread__clear_kernel_queue_wait(thread);
             }
             else
             {
-                if (Process__wake_expired_sleep(process, cpu->last_tick + 1))
+                if (Thread__wake_expired_sleep(thread, cpu->last_tick + 1))
                 {
-                    Process__clear_kernel_queue_wait(process);
+                    Thread__clear_kernel_queue_wait(thread);
                 }
             }
         }
@@ -1286,18 +1634,18 @@ static void Scheduler__poll_queue_waiters(SchedulerPtr self)
 static void Scheduler__poll_exec_load_waiters(CPUSchedulerPtr cpu)
 {
     for_each_fa(
-        ProcessTable,
-        cpu->processes,
+        ThreadTable,
+        cpu->threads,
         index,
-        process,
+        thread,
         {
-            if (process->state == PROC_STATE_WAITING &&
-                Process__has_parked_operation(process, PARK_WAIT_EXEC_LOAD, &None(OperationKey)) &&
-                ExecLoad__ready(process))
+            if (thread->state == PROC_STATE_WAITING &&
+                Thread__has_parked_operation(thread, PARK_WAIT_EXEC_LOAD, &None(OperationKey)) &&
+                ExecLoad__ready(thread->owner))
             {
-                Process__mark_parked_operation_ready(process, PARK_WAIT_EXEC_LOAD, &None(OperationKey),
-                                                     &None(ReturnCode));
-                process->state = PROC_STATE_INTERRUPTED;
+                Thread__mark_parked_operation_ready(thread, PARK_WAIT_EXEC_LOAD, &None(OperationKey),
+                                                    &None(ReturnCode));
+                thread->state = PROC_STATE_INTERRUPTED;
             }
         }
     );
@@ -1316,27 +1664,25 @@ static Result(ProcessPtr)
                                             OptionalPtr(OperationKey) operation_key)
 {
     __d_printf(SCHEDULER, "CPUScheduler__unpark %s\n", cstr(proc->name));
-    __d_printf(SCHEDULER, "CPUScheduler__unpark cpu=%i target pid=%i name=%s state=%s reason=%i\n", self->cpu,
-               proc->pid, cstr(proc->name), ProcessState__to_string(proc->state), reason);
     match_optional(
         ProcessTable__find_item(&self->processes, proc),
         some(index)
         {
-            __d_printf(SCHEDULER, "CPUScheduler__unpark - done %s\n", cstr(proc->name));
-            __d_printf(SCHEDULER, "CPUScheduler__unpark cpu=%i found target index=%i\n", self->cpu, index);
-            if (Process__mark_parked_operation_ready(proc, reason, operation_key, return_code))
-            {
-                proc->state = PROC_STATE_INTERRUPTED;
-                __d_printf(SCHEDULER, "CPUScheduler__unpark cpu=%i success pid=%i state=%s\n", self->cpu, proc->pid,
-                           ProcessState__to_string(proc->state));
-                return Success(ProcessPtr, proc);
-            }
-            else
-            {
-                __d_printf(SCHEDULER, "CPUScheduler__unpark cpu=%i target pid=%i was not parked\n", self->cpu,
-                           proc->pid);
-                return Error(ProcessPtr, process_wasnt_parked, SCHEDULER_CANT_UNPARK);
-            }
+            for_each_fa(
+                ThreadTable,
+                self->threads,
+                thread_index,
+                thread,
+                {
+                    if (thread->owner == proc &&
+                        Thread__mark_parked_operation_ready(thread, reason, operation_key, return_code))
+                    {
+                        thread->state = PROC_STATE_INTERRUPTED;
+                        return Success(ProcessPtr, proc);
+                    }
+                }
+            );
+            return Error(ProcessPtr, process_wasnt_parked, SCHEDULER_CANT_UNPARK);
         },
         none()
         {
@@ -1346,15 +1692,16 @@ static Result(ProcessPtr)
     );
 }
 
-static void CPUScheduler__continue_current(CPUSchedulerPtr self, ProcessPtr process)
+static void CPUScheduler__continue_current(CPUSchedulerPtr self, ThreadPtr thread)
 {
-    self->switching_out = None(ProcessPtr);
-    process->migration_safe = false;
-    process->state = PROC_STATE_RUNNING;
+    self->switching_out = None(ThreadPtr);
+    thread->migration_safe = false;
+    thread->state = PROC_STATE_RUNNING;
 }
 
-Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const OptionalPtr(ProcessContextPtr) context)
+Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const OptionalPtr(ThreadContextPtr) context)
 {
+    Optional(ThreadPtr) current_thread = CPUScheduler__current_thread(self);
     Optional(ProcessPtr) current = CPUScheduler__current_process(self);
     critical_section(
         self->scheduler_lock,
@@ -1365,12 +1712,13 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
     );
 
     match_optional(
-        current,
-        some(proc)
+        current_thread,
+        some(thread)
         {
+            ProcessPtr proc = thread->owner;
             __d_printf(SCHEDULER, "CPUScheduler__interrupt %s\n", cstr(proc->name));
             match_result(
-                Process__save_context(proc, context),
+                Thread__save_context(thread, context),
                 success_do_nothing(),
                 error(code, message)
                 {
@@ -1379,50 +1727,59 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
                     return None(ContextSwitch);
                 }
             );
-            proc->last_tick = self->last_tick;
+            thread->last_tick = self->last_tick;
+            if (proc->lifecycle.terminating)
+            {
+                self->switching_out = Some(ThreadPtr, thread);
+                thread->state = PROC_STATE_SWITCHING_CONTEXT;
+                self->idle_process->thread.state = PROC_STATE_SWITCHING_CONTEXT;
+                return Some(ContextSwitch, ContextSwitch__new(&self->idle_process->thread, &current_thread));
+            }
             if (proc != self->idle_process && Process__retain_preferred(proc))
             {
                 SchedulerPtr scheduler = proc->kernel->scheduler;
                 if (!Scheduler__ready_exec_continuation_waiting(scheduler, proc))
                 {
-                    CPUScheduler__continue_current(self, proc);
+                    CPUScheduler__continue_current(self, thread);
                     return None(ContextSwitch);
                 }
                 Scheduler__forget_preferred(scheduler, proc);
             }
-            self->switching_out = current;
-            proc->state = PROC_STATE_SWITCHING_CONTEXT;
+            self->switching_out = Some(ThreadPtr, thread);
+            thread->state = PROC_STATE_SWITCHING_CONTEXT;
         },
         none_do_nothing()
     );
 
     __d_println(SCHEDULER, "CPUScheduler__interrupt\n");
 
-    Optional(ProcessPtr) selected = CPUScheduler__select_ready(self);
+    Optional(ThreadPtr) selected = CPUScheduler__select_ready(self);
     match_optional(
         selected,
-        some(new_proc)
+        some(new_thread)
         {
+            ProcessPtr new_proc = new_thread->owner;
             match_optional(
-                current,
-                some(proc)
+                current_thread,
+                some(thread)
                 {
-                    if (!new_proc->preferred_active && Process__shared_wait_ready(proc) &&
+                    ProcessPtr proc = thread->owner;
+                    if (!new_thread->preferred_active && Thread__shared_wait_ready(thread) &&
                         Process__has_pending_messages(proc) && !Process__has_pending_messages(new_proc))
                     {
                         if (Process__has_pending_signal(proc))
                         {
-                            return Some(ContextSwitch, ContextSwitch__new(proc, &current));
+                            return Some(ContextSwitch, ContextSwitch__new(thread, &current_thread));
                         }
-                        CPUScheduler__continue_current(self, proc);
+                        CPUScheduler__continue_current(self, thread);
                         return None(ContextSwitch);
                     }
                 },
                 none_do_nothing()
             );
             __d_printf(SCHEDULER, "selected - %p %s\n", new_proc, cstr(new_proc->name));
-            new_proc->state = PROC_STATE_SWITCHING_CONTEXT;
-            ContextSwitch context_switch = ContextSwitch__new(new_proc, &current);
+            new_thread->state = PROC_STATE_SWITCHING_CONTEXT;
+            ContextSwitch context_switch = ContextSwitch__new(new_thread, &current_thread);
 
             return Some(ContextSwitch, context_switch);
         },
@@ -1433,37 +1790,38 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
                 some(waiter)
                 {
                     match_optional(
-                        current,
-                        some(proc)
+                        current_thread,
+                        some(thread)
                         {
-                            if (proc == waiter)
+                            if (thread == &waiter->thread)
                             {
-                                CPUScheduler__continue_current(self, proc);
+                                CPUScheduler__continue_current(self, thread);
                                 return None(ContextSwitch);
                             }
                         },
                         none_do_nothing()
                     );
-                    waiter->state = PROC_STATE_SWITCHING_CONTEXT;
-                    return Some(ContextSwitch, ContextSwitch__new(waiter, &current));
+                    waiter->thread.state = PROC_STATE_SWITCHING_CONTEXT;
+                    return Some(ContextSwitch, ContextSwitch__new(&waiter->thread, &current_thread));
                 },
                 none_do_nothing()
             );
             match_optional(
-                current,
-                some(proc)
+                current_thread,
+                some(thread)
                 {
+                    ProcessPtr proc = thread->owner;
                     if (Process__has_pending_signal(proc))
                     {
-                        return Some(ContextSwitch, ContextSwitch__new(proc, &current));
+                        return Some(ContextSwitch, ContextSwitch__new(thread, &current_thread));
                     }
-                    if (!Process__shared_wait_ready(proc))
+                    if (!Thread__shared_wait_ready(thread))
                     {
                         ProcessPtr idle = self->idle_process;
-                        idle->state = PROC_STATE_SWITCHING_CONTEXT;
-                        return Some(ContextSwitch, ContextSwitch__new(idle, &current));
+                        idle->thread.state = PROC_STATE_SWITCHING_CONTEXT;
+                        return Some(ContextSwitch, ContextSwitch__new(&idle->thread, &current_thread));
                     }
-                    CPUScheduler__continue_current(self, proc);
+                    CPUScheduler__continue_current(self, thread);
                     __d_printf(SCHEDULER, "no new proc remain with current - %p %s\n", proc, cstr(proc->name));
                     return None(ContextSwitch);
                 },
@@ -1471,9 +1829,9 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
                 {
                     // no current and nothing ready, go idle
                     ProcessPtr idle = self->idle_process;
-                    idle->state = PROC_STATE_SWITCHING_CONTEXT;
+                    idle->thread.state = PROC_STATE_SWITCHING_CONTEXT;
                     __d_printf(SCHEDULER, "no new proc or current going idle - %p %s\n", idle, cstr(idle->name));
-                    ContextSwitch context_switch = ContextSwitch__new(idle, &current);
+                    ContextSwitch context_switch = ContextSwitch__new(&idle->thread, &current_thread);
                     return Some(ContextSwitch, context_switch);
                 }
             );
@@ -1482,16 +1840,16 @@ Optional(ContextSwitch) CPUScheduler__interrupt(CPUSchedulerPtr self, const Opti
     return None(ContextSwitch);
 }
 
-static Optional(ContextSwitch) CPUScheduler__yield_waiting(CPUSchedulerPtr self, ProcessPtr waiting_proc)
+static Optional(ContextSwitch) CPUScheduler__yield_waiting(CPUSchedulerPtr self, ThreadPtr waiting_thread)
 {
-    self->switching_out = Some(ProcessPtr, waiting_proc);
-    Optional(ProcessPtr) selected = CPUScheduler__select_ready(self);
+    self->switching_out = Some(ThreadPtr, waiting_thread);
+    Optional(ThreadPtr) selected = CPUScheduler__select_ready(self);
     match_optional(
         selected,
-        some(new_proc)
+        some(new_thread)
         {
-            new_proc->state = PROC_STATE_SWITCHING_CONTEXT;
-            return Some(ContextSwitch, ContextSwitch__new(new_proc, &Some(ProcessPtr, waiting_proc)));
+            new_thread->state = PROC_STATE_SWITCHING_CONTEXT;
+            return Some(ContextSwitch, ContextSwitch__new(new_thread, &Some(ThreadPtr, waiting_thread)));
         },
         none()
         {
@@ -1499,44 +1857,44 @@ static Optional(ContextSwitch) CPUScheduler__yield_waiting(CPUSchedulerPtr self,
                 CPUScheduler__select_speculative_waiter(self, &None(ProcessPtr)),
                 some(waiter)
                 {
-                    waiter->state = PROC_STATE_SWITCHING_CONTEXT;
-                    return Some(ContextSwitch, ContextSwitch__new(waiter, &Some(ProcessPtr, waiting_proc)));
+                    waiter->thread.state = PROC_STATE_SWITCHING_CONTEXT;
+                    return Some(ContextSwitch, ContextSwitch__new(&waiter->thread, &Some(ThreadPtr, waiting_thread)));
                 },
                 none_do_nothing()
             );
             ProcessPtr idle = self->idle_process;
-            idle->state = PROC_STATE_SWITCHING_CONTEXT;
-            return Some(ContextSwitch, ContextSwitch__new(idle, &Some(ProcessPtr, waiting_proc)));
+            idle->thread.state = PROC_STATE_SWITCHING_CONTEXT;
+            return Some(ContextSwitch, ContextSwitch__new(&idle->thread, &Some(ThreadPtr, waiting_thread)));
         }
     );
 
     return None(ContextSwitch);
 }
 
-static Optional(ContextSwitch) CPUScheduler__yield_runnable(CPUSchedulerPtr self, ProcessPtr yielding_proc)
+static Optional(ContextSwitch) CPUScheduler__yield_runnable(CPUSchedulerPtr self, ThreadPtr yielding_thread)
 {
-    if (yielding_proc->state != PROC_STATE_RUNNING)
+    if (yielding_thread->state != PROC_STATE_RUNNING)
     {
         return None(ContextSwitch);
     }
 
-    yielding_proc->state = PROC_STATE_INTERRUPTED;
-    self->switching_out = Some(ProcessPtr, yielding_proc);
+    yielding_thread->state = PROC_STATE_INTERRUPTED;
+    self->switching_out = Some(ThreadPtr, yielding_thread);
     match_optional(
         CPUScheduler__select_ready(self),
-        some(new_proc)
+        some(new_thread)
         {
-            if (new_proc == yielding_proc)
+            if (new_thread == yielding_thread)
             {
-                CPUScheduler__continue_current(self, yielding_proc);
+                CPUScheduler__continue_current(self, yielding_thread);
                 return None(ContextSwitch);
             }
-            new_proc->state = PROC_STATE_SWITCHING_CONTEXT;
-            return Some(ContextSwitch, ContextSwitch__new(new_proc, &Some(ProcessPtr, yielding_proc)));
+            new_thread->state = PROC_STATE_SWITCHING_CONTEXT;
+            return Some(ContextSwitch, ContextSwitch__new(new_thread, &Some(ThreadPtr, yielding_thread)));
         },
         none()
         {
-            CPUScheduler__continue_current(self, yielding_proc);
+            CPUScheduler__continue_current(self, yielding_thread);
             return None(ContextSwitch);
         }
     );
@@ -1549,9 +1907,9 @@ void CPUScheduler__start(CPUSchedulerPtr self)
 {
     __d_printf(SCHEDULER, "CPUScheduler__start cpu=%i idle pid=%i name=%s state=%s context=%p page_table=%p\n",
                self->cpu, self->idle_process->pid, cstr(self->idle_process->name),
-               ProcessState__to_string(self->idle_process->state), Process__required_context(self->idle_process),
-               paddr(ProcessPageTable__root(&self->idle_process->page_table)));
-    ContextSwitch context_switch = ContextSwitch__new(self->idle_process, &None(ProcessPtr));
+               ProcessState__to_string(self->idle_process->thread.state), Process__required_context(self->idle_process),
+               paddr(ProcessPageTable__root(&self->idle_process->address_space.page_table)));
+    ContextSwitch context_switch = ContextSwitch__new(&self->idle_process->thread, &None(ThreadPtr));
     ContextSwitch__switch(&context_switch);
 }
 
@@ -1736,21 +2094,45 @@ static ConstBStringPtr ProcessAbortReason__to_string(ProcessAbortReason reason)
     }
 }
 
-static bool Scheduler__is_parked_for(ProcessPtr proc, ParkReason reason)
+static bool Scheduler__is_parked_for(SchedulerPtr self, ProcessPtr proc, ParkReason reason)
 {
-    Optional(OperationKey) operation_key = None(OperationKey);
-    return Process__has_parked_operation(proc, reason, &None(OperationKey));
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu,
+        scheduler,
+        {
+            for_each_fa(
+                ThreadTable,
+                scheduler->threads,
+                thread_index,
+                thread,
+                {
+                    if (thread->owner == proc &&
+                        Thread__has_parked_operation(thread, reason, &None(OperationKey)))
+                    {
+                        return true;
+                    }
+                }
+            );
+        }
+    );
+
+    return false;
 }
 
 static ProcessTimes Scheduler__process_times_at(ProcessPtr process, CPUTime now)
 {
-    ProcessCPUUsage usage = CPUUsage__snapshot(&process->cpu_usage, now, Process__user_wait_usec(process, now));
+    ProcessCPUUsage usage =
+        CPUUsage__snapshot(&process->accounting.cpu_usage, now, Process__user_wait_usec(process, now));
     ProcessTimes times = ProcessTimes__new();
     times.elapsed_usec = now;
     times.user_usec = usage.user_usec;
     times.system_usec = usage.system_usec;
-    times.children_user_usec = process->children_user_usec;
-    times.children_system_usec = process->children_system_usec;
+    times.children_user_usec = process->accounting.children_user_usec;
+    times.children_system_usec = process->accounting.children_system_usec;
     return times;
 }
 
@@ -1766,7 +2148,6 @@ ProcessTimes Scheduler__process_times(SchedulerPtr self, ProcessPtr process)
 
 static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, ProcessPtr proc, ReturnCode return_code)
 {
-    Process__quiesce_device(proc);
     match_optional(
         self->kernel,
         some_do_nothing(),
@@ -1776,6 +2157,79 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
         }
     );
     ProcessID pid = proc->pid;
+    critical_section(
+        self->scheduler_lock,
+        {
+            if (is_nothing(Scheduler__scheduler_owning_process_locked(self, proc)))
+            {
+                cs_return(Error(ProcessID, process_not_found, SCHEDULER_PROCESS_NOT_FOUND));
+            }
+            if (proc->lifecycle.terminating)
+            {
+                cs_return(
+                    Error(ProcessID, bstring("Process already terminating"), SCHEDULER_GENERAL_ERROR));
+            }
+            proc->lifecycle.terminating = true;
+        }
+    );
+    bool remote_active = true;
+    while (remote_active)
+    {
+        remote_active = false;
+        for_each_hashtable(
+            CPUSchedulers,
+            self->schedulers,
+            bucket_index,
+            entry_index,
+            cpu,
+            sched,
+            {
+                if (cpu == CPU__id())
+                {
+                    continue;
+                }
+                bool uses_process = false;
+                critical_section(
+                    self->scheduler_lock,
+                    {
+                        match_optional(
+                            sched->active_process,
+                            some(active)
+                            {
+                                uses_process = active == proc;
+                            },
+                            none_do_nothing()
+                        );
+                        match_optional(
+                            sched->dispatching_process,
+                            some(dispatching)
+                            {
+                                uses_process = uses_process || dispatching == proc;
+                            },
+                            none_do_nothing()
+                        );
+                    }
+                );
+                if (uses_process)
+                {
+                    remote_active = true;
+                    CPU__request_reschedule(cpu);
+                }
+            }
+        );
+        if (remote_active)
+        {
+            CPU__yield();
+        }
+    }
+    match_result(
+        Process__dispose_owned_kernel_resources(proc),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ProcessID, message, SCHEDULER_GENERAL_ERROR);
+        }
+    );
     for_each_hashtable(
         CPUSchedulers,
         self->schedulers,
@@ -1784,60 +2238,47 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
         cpu,
         sched,
         {
-            Result(ProcessPtr) res = Scheduler__detach_exiting_process(self, sched, proc);
+            Result(ProcessPtr) res = Scheduler__detach_exiting_process(self, sched, proc, return_code);
             match_result(
                 res,
                 success(exited)
                 {
-                    match_optional(
-                        exited->parent,
-                        some(parent)
+                    MMU__dereference_user_mappings(proc->kernel,
+                                                   ProcessPageTable__root(&proc->address_space.page_table));
+                    critical_section(
+                        self->scheduler_lock,
                         {
-                            if (!Scheduler__is_parked_for(parent, PARK_WAIT_CHILD))
-                            {
-                                match_result(
-                                    Scheduler__notify_parent_child_exit_locked(self, parent, proc, return_code),
-                                    success_do_nothing(),
-                                    error(code, message)
-                                    {
-                                        return Error(ProcessID, message, code);
-                                    }
-                                );
-                            }
-                            if (Scheduler__is_parked_for(parent, PARK_WAIT_CHILD))
-                            {
-                                match_optional(
-                                    proc->abort,
-                                    some(abort)
-                                    {
-                                        Process__write_child_abort_report(
-                                            parent, SpawnAbortReport__new(abort.reason, abort.exception_code, abort.pc,
-                                                                          abort.fault_address));
-                                    },
-                                    none_do_nothing()
-                                );
-                                ProcessTimes child_times = Scheduler__process_times_at(proc, CPU__time_usec());
-                                parent->children_user_usec += child_times.user_usec + child_times.children_user_usec;
-                                parent->children_system_usec +=
-                                    child_times.system_usec + child_times.children_system_usec;
-                                __d_printf(
-                                    PROGRESS,
-                                    "scheduler child complete child_pid=%i child_name=%s parent_pid=%i parent_name=%s return_code=%i\n",
-                                    proc->pid, cstr(proc->name), parent->pid, cstr(parent->name), return_code);
-                                match_result(
-                                    Scheduler__unpark(self, parent, PARK_WAIT_CHILD, &Some(ReturnCode, return_code)),
-                                    success_do_nothing(),
-                                    error(code, message)
-                                    {
-                                        return Error(ProcessID, message, code);
-                                    }
-                                );
-                            }
-                        },
-                        none_do_nothing()
+                            match_optional(
+                                CPUSchedulers__get(&self->schedulers, CPU__id()),
+                                some(local)
+                                {
+                                    match_optional(
+                                        local->active_process,
+                                        some(active)
+                                        {
+                                            if (active == proc)
+                                            {
+                                                local->active_process = None(ProcessPtr);
+                                            }
+                                        },
+                                        none_do_nothing()
+                                    );
+                                    match_optional(
+                                        local->dispatching_process,
+                                        some(dispatching)
+                                        {
+                                            if (dispatching == proc)
+                                            {
+                                                local->dispatching_process = None(ProcessPtr);
+                                            }
+                                        },
+                                        none_do_nothing()
+                                    );
+                                },
+                                none_do_nothing()
+                            );
+                        }
                     );
-
-                    MMU__dereference_user_mappings(proc->kernel, ProcessPageTable__root(&proc->page_table));
                     match_result(
                         Process__dispose_user_allocations(proc),
                         success_do_nothing(),
@@ -1870,7 +2311,7 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
                         some_do_nothing(),
                         none()
                         {
-                            Scheduler__preempt(self, cpu, &None(ProcessContextPtr));
+                            Scheduler__preempt(self, cpu, &None(ThreadContextPtr));
                         }
                     );
 
@@ -1891,6 +2332,60 @@ static Result(ProcessID) Scheduler__terminate_process(SchedulerPtr self, Process
     return Error(ProcessID, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
+void Scheduler__address_space_switched(SchedulerPtr self, CPUID cpu, ProcessPtr process)
+{
+    bool terminating = false;
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_optional(
+                CPUSchedulers__get(&self->schedulers, cpu),
+                some(scheduler)
+                {
+                    scheduler->active_process = Some(ProcessPtr, process);
+                    scheduler->dispatching_process = None(ProcessPtr);
+                },
+                none_do_nothing()
+            );
+            terminating = process->lifecycle.terminating;
+        }
+    );
+
+    if (terminating)
+    {
+        CPU__request_reschedule(cpu);
+    }
+}
+
+void Scheduler__revoke_current_if_terminating(SchedulerPtr self, CPUID cpu, ThreadContextPtr context)
+{
+    bool terminating = false;
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_optional(
+                CPUSchedulers__get(&self->schedulers, cpu),
+                some(scheduler)
+                {
+                    match_optional(
+                        CPUScheduler__current_thread(scheduler),
+                        some(thread)
+                        {
+                            terminating = thread->owner->lifecycle.terminating;
+                        },
+                        none_do_nothing()
+                    );
+                },
+                none_do_nothing()
+            );
+        }
+    );
+    if (terminating)
+    {
+        Scheduler__preempt(self, cpu, &Some(ThreadContextPtr, context));
+    }
+}
+
 static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerPtr self, ProcessPtr parent,
                                                                       ProcessPtr child, ReturnCode return_code)
 {
@@ -1902,14 +2397,17 @@ static Result(ServiceCode) Scheduler__notify_parent_child_exit_locked(SchedulerP
     {
         event.status = PROCESS_WAIT_STATUS_SIGNALED(PROCESS_SIGNAL_EXIT_BASE - return_code);
     }
+
     else if (return_code <= PROCESS_ABORT_EXIT_BASE - 1 && return_code >= PROCESS_ABORT_EXIT_BASE - 127)
     {
         event.status = PROCESS_WAIT_STATUS_SIGNALED(PROCESS_WAIT_ABORT_SIGNAL);
     }
+
     else
     {
         event.status = PROCESS_WAIT_STATUS_EXITED(return_code);
     }
+
     event.type = PROCESS_CHILD_EVENT_EXITED;
     event.user_usec = child_times.user_usec + child_times.children_user_usec;
     event.system_usec = child_times.system_usec + child_times.children_system_usec;
@@ -1990,7 +2488,7 @@ Result(ProcessID) Scheduler__exit(SchedulerPtr self, ProcessPtr proc, ReturnCode
 
 Result(ProcessID) Scheduler__abort_process(SchedulerPtr self, ProcessPtr proc, ProcessAbort abort)
 {
-    proc->abort = Some(ProcessAbort, abort);
+    proc->lifecycle.abort = Some(ProcessAbort, abort);
     ConstBStringPtr reason = ProcessAbortReason__to_string(abort.reason);
     BString message =
         BString__sprintf(&abort_format, proc->pid, cstr(proc->name), cstr_p(reason), abort.exception_description,
@@ -2094,11 +2592,12 @@ static bool Scheduler__caller_can_set_process_group(ProcessPtr caller, ProcessPt
     {
         return true;
     }
+
     match_optional(
         target->parent,
         some(parent)
         {
-            return parent == caller && !target->execed_since_fork;
+            return parent == caller && !target->lifecycle.execed_since_fork;
         },
         none_do_nothing()
     );
@@ -2126,6 +2625,7 @@ Result(ProcessGroupID) Scheduler__process_group(SchedulerPtr self, ProcessPtr ca
             );
         }
     );
+
     return Error(ProcessGroupID, process_not_found, PROCESS_GROUP_PROCESS_NOT_FOUND);
 }
 
@@ -2136,6 +2636,7 @@ Result(ProcessGroupID)
     {
         return Error(ProcessGroupID, bstr("Invalid process group change"), PROCESS_GROUP_INVALID_ARGUMENT);
     }
+
     ProcessID target_pid = pid == 0 ? caller->pid : (ProcessID)pid;
     critical_section(
         self->scheduler_lock,
@@ -2176,6 +2677,7 @@ Result(ProcessGroupID)
             );
         }
     );
+
     return Error(ProcessGroupID, process_not_found, PROCESS_GROUP_PROCESS_NOT_FOUND);
 }
 
@@ -2228,6 +2730,7 @@ static Result(ProcessID)
     {
         return Error(ProcessID, bstring("Unsupported signal"), PROCESS_SIGNAL_UNSUPPORTED);
     }
+
     if (signal == 0)
     {
         return Success(ProcessID, process->pid);
@@ -2236,13 +2739,35 @@ static Result(ProcessID)
     // Only the owning CPU may destroy a target that a context switch can still reference.
     Process__queue_signal(process, signal);
     Process__wake_shared_wait(process);
-    if (Process__mark_signal_suspend_ready(process))
+    bool signal_wait_ready = false;
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu,
+        scheduler,
+        {
+            for_each_fa(
+                ThreadTable,
+                scheduler->threads,
+                thread_index,
+                thread,
+                {
+                    if (!signal_wait_ready && thread->owner == process &&
+                        Thread__mark_signal_suspend_ready(thread))
+                    {
+                        thread->state = PROC_STATE_INTERRUPTED;
+                        signal_wait_ready = true;
+                    }
+                }
+            );
+        }
+    );
+
+    if (process->thread.state == PROC_STATE_STOPPED && signal == PROCESS_SIGNAL_CONTINUE)
     {
-        process->state = PROC_STATE_INTERRUPTED;
-    }
-    if (process->state == PROC_STATE_STOPPED && signal == PROCESS_SIGNAL_CONTINUE)
-    {
-        process->state = PROC_STATE_INTERRUPTED;
+        process->thread.state = PROC_STATE_INTERRUPTED;
         match_optional(
             process->parent,
             some(parent)
@@ -2260,9 +2785,9 @@ static Result(ProcessID)
             none_do_nothing()
         );
     }
-    else if (process->state == PROC_STATE_STOPPED && signal == PROCESS_SIGNAL_KILL)
+    else if (process->thread.state == PROC_STATE_STOPPED && signal == PROCESS_SIGNAL_KILL)
     {
-        process->state = PROC_STATE_INTERRUPTED;
+        process->thread.state = PROC_STATE_INTERRUPTED;
     }
 
     return Success(ProcessID, process->pid);
@@ -2318,7 +2843,8 @@ static bool Scheduler__signal_permitted(ProcessPtr sender, ProcessPtr target, Pr
            (signal == PROCESS_SIGNAL_CONTINUE && sender->session_id == target->session_id);
 }
 
-Result(ProcessID) Scheduler__send_signal(SchedulerPtr self, ProcessPtr sender, int64_t target, ProcessSignal signal)
+static Result(ProcessID) Scheduler__send_signal_authorized(SchedulerPtr self, ProcessPtr sender, int64_t target,
+                                                           ProcessSignal signal, bool terminal_interrupt)
 {
     if (target == INT64_MIN || signal > PROCESS_SIGNAL_COUNT)
     {
@@ -2340,7 +2866,7 @@ Result(ProcessID) Scheduler__send_signal(SchedulerPtr self, ProcessPtr sender, i
                     if (Scheduler__signal_target_matches(sender, candidate, target))
                     {
                         matched++;
-                        if (Scheduler__signal_permitted(sender, candidate, signal))
+                        if (terminal_interrupt || Scheduler__signal_permitted(sender, candidate, signal))
                         {
                             match_result(
                                 Scheduler__queue_signal_to_process_locked(self, candidate, signal),
@@ -2371,12 +2897,32 @@ Result(ProcessID) Scheduler__send_signal(SchedulerPtr self, ProcessPtr sender, i
     return Error(ProcessID, process_not_found, PROCESS_SIGNAL_PROCESS_NOT_FOUND);
 }
 
-ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, ProcessPtr process,
-                                                            ProcessContextPtr context)
+Result(ProcessID) Scheduler__send_signal(SchedulerPtr self, ProcessPtr sender, int64_t target, ProcessSignal signal)
 {
+    return Scheduler__send_signal_authorized(self, sender, target, signal, false);
+}
+
+Result(ProcessID) Scheduler__send_terminal_interrupt(SchedulerPtr self, ProcessPtr sender, int64_t target)
+{
+    if (target >= -1 || target == INT64_MIN)
+    {
+        return Error(ProcessID, bstr("Invalid terminal signal target"), PROCESS_SIGNAL_INVALID_ARGUMENT);
+    }
+    if (!Process__has_capability(sender, PROCESS_CAP_SIGNAL_TERMINAL))
+    {
+        return Error(ProcessID, process_permission_denied, PROCESS_SIGNAL_PERMISSION_DENIED);
+    }
+
+    return Scheduler__send_signal_authorized(self, sender, target, PROCESS_SIGNAL_INTERRUPT, true);
+}
+
+ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, ThreadPtr thread,
+                                                            ThreadContextPtr context)
+{
+    ProcessPtr process = thread->owner;
     ProcessSignalDelivery delivery = ProcessSignalDelivery__new(PROCESS_SIGNAL_DELIVERY_NONE, 0);
     match_result(
-        Process__deliver_pending_signal(process, context),
+        Thread__deliver_pending_signal(thread, context),
         success(prepared)
         {
             delivery = prepared;
@@ -2394,8 +2940,8 @@ ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, P
         {
             if (operation->park_reason == PARK_WAIT_QUEUE)
             {
-                Process__clear_kernel_queue_wait(process);
-                QueueWaitUsage__cancel(&process->queue_wait_usage);
+                Thread__clear_kernel_queue_wait(thread);
+                QueueWaitUsage__cancel(&thread->queue_wait_usage);
             }
             ParkedOperation__dispose(operation);
         },
@@ -2405,14 +2951,6 @@ ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, P
     if (delivery.kind == PROCESS_SIGNAL_DELIVERY_TERMINATE)
     {
         match_result(
-            Process__dispose_owned_kernel_resources(process),
-            success_do_nothing(),
-            error(code, message)
-            {
-                Kernel__panic(cstr(message), context);
-            }
-        );
-        match_result(
             Scheduler__exit(self, process, ProcessSignal__exit_code(delivery.signal)),
             success_do_nothing(),
             error(code, message)
@@ -2421,10 +2959,11 @@ ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, P
             }
         );
     }
-    else if (delivery.kind == PROCESS_SIGNAL_DELIVERY_STOP && process->state != PROC_STATE_STOPPED)
+
+    else if (delivery.kind == PROCESS_SIGNAL_DELIVERY_STOP && thread->state != PROC_STATE_STOPPED)
     {
         match_result(
-            Process__store_context(process, context),
+            Thread__store_context(thread, context),
             success_do_nothing(),
             error(code, message)
             {
@@ -2434,7 +2973,7 @@ ProcessSignalDeliveryKind Scheduler__deliver_pending_signal(SchedulerPtr self, P
         critical_section(
             self->scheduler_lock,
             {
-                process->state = PROC_STATE_STOPPED;
+                thread->state = PROC_STATE_STOPPED;
                 match_optional(
                     process->parent,
                     some(parent)
@@ -2563,7 +3102,7 @@ static Result(ProcessPtr) Scheduler__park_with_context_ownership_and_operation_k
                         some_do_nothing(),
                         none()
                         {
-                            Scheduler__preempt(self, cpu, &None(ProcessContextPtr));
+                            Scheduler__preempt(self, cpu, &None(ThreadContextPtr));
                         }
                     );
 
@@ -2623,8 +3162,108 @@ Result(ProcessPtr)
     return Scheduler__unpark_with_operation_key(self, proc, reason, return_code, &None(OperationKey));
 }
 
-Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, uint64_t usec)
+Result(ThreadWaitStatus) Scheduler__wait_atomic(SchedulerPtr self, ThreadPtr caller, Address address,
+                                                ThreadWaitValue expected, ThreadWaitTimeout timeout_usec)
 {
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_optional(
+                Process__atomic_wait_mapping(caller->owner, address),
+                some(mapping)
+                {
+                    ThreadWaitValuePtr word = (ThreadWaitValuePtr)mapping.virtual_addr;
+                    if (__atomic_load_n(word, __ATOMIC_ACQUIRE) != expected)
+                    {
+                        cs_return(Success(ThreadWaitStatus, THREAD_WAIT_CHANGED));
+                    }
+                },
+                none()
+                {
+                    cs_return(Error(ThreadWaitStatus, bstr("Invalid atomic wait address"), THREAD_WAIT_INVALID));
+                }
+            );
+            if (Thread__can_resume_for_signal(caller))
+            {
+                cs_return(Success(ThreadWaitStatus, THREAD_WAIT_INTERRUPTED));
+            }
+            if (timeout_usec == 0)
+            {
+                cs_return(Success(ThreadWaitStatus, THREAD_WAIT_TIMED_OUT));
+            }
+            match_optional(
+                CPUSchedulers__get(&self->schedulers, CPU__id()),
+                some(cpu)
+                {
+                    if (is_nothing(ThreadTable__find_item(&cpu->threads, caller)))
+                    {
+                        cs_return(Error(ThreadWaitStatus, process_not_found, THREAD_WAIT_INVALID));
+                    }
+                    Optional(OperationKey) deadline = None(OperationKey);
+                    if (timeout_usec != THREAD_WAIT_INDEFINITE)
+                    {
+                        Tick ticks = CPUScheduler__sleep_ticks_from_usec(timeout_usec);
+                        if (ticks >= UINT64_MAX - cpu->last_tick)
+                        {
+                            cs_return(
+                                Error(ThreadWaitStatus, bstr("Atomic wait deadline overflow"), THREAD_WAIT_INVALID));
+                        }
+                        deadline = Some(OperationKey, cpu->last_tick + ticks + 1);
+                    }
+                    KernelContextPtr context =
+                        KernelContext__heap_new(&Some(ThreadPtr, caller), &Some(SchedulerPtr, self));
+                    match_result(
+                        CPUScheduler__park(cpu, caller->owner, context, &Some(Continuation, SystemCall__Complete),
+                                           PARK_WAIT_ATOMIC, true, &deadline, address),
+                        success(_)
+                        {
+                            cs_return(Error(ThreadWaitStatus, bstr("Atomic wait pending"), SYSCALL_IO_BLOCK));
+                        },
+                        error(code, message)
+                        {
+                            KernelContext__dispose_heap(context);
+                            cs_return(Error(ThreadWaitStatus, message, THREAD_WAIT_FAILED));
+                        }
+                    );
+                },
+                none_do_nothing()
+            );
+        }
+    );
+    return Error(ThreadWaitStatus, process_not_found, THREAD_WAIT_INVALID);
+}
+
+Result(ThreadWakeResult) Scheduler__wake_atomic(SchedulerPtr self, ThreadPtr caller, Address address, uint64_t count)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            if (is_nothing(Process__atomic_wait_mapping(caller->owner, address)))
+            {
+                cs_return(
+                    Error(ThreadWakeResult, bstr("Invalid atomic wake address"), THREAD_WAIT_INVALID));
+            }
+            ThreadWakeResult woken = 0;
+            for_each_ll(
+                ProcessThreads,
+                caller->owner->threads,
+                thread,
+                {
+                    if ((uint64_t)woken < count && Thread__wake_atomic_wait(thread, address))
+                    {
+                        woken++;
+                    }
+                }
+            );
+            cs_return(Success(ThreadWakeResult, woken));
+        }
+    );
+    return Error(ThreadWakeResult, process_not_found, THREAD_WAIT_INVALID);
+}
+
+Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ThreadPtr thread, uint64_t usec)
+{
+    ProcessPtr process = thread->owner;
     for_each_hashtable(
         CPUSchedulers,
         self->schedulers,
@@ -2634,19 +3273,17 @@ Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, 
         sched,
         {
             match_optional(
-                ProcessTable__find_item(&sched->processes, process),
+                ThreadTable__find_item(&sched->threads, thread),
                 some(index)
                 {
                     Tick deadline = sched->last_tick + CPUScheduler__sleep_ticks_from_usec(usec) + 1ULL;
-                    Optional(ProcessID) pid = Some(ProcessID, process->pid);
                     Optional(SchedulerPtr) scheduler = Some(SchedulerPtr, self);
-                    KernelContextPtr kernel_context = KernelContext__heap_new(&pid, &scheduler);
+                    KernelContextPtr kernel_context = KernelContext__heap_new(&Some(ThreadPtr, thread), &scheduler);
 
                     Optional(Continuation) continuation = Some(Continuation, SystemCall__Complete);
                     Optional(OperationKey) operation_key = Some(OperationKey, deadline);
                     return Scheduler__park_with_context_ownership_and_operation_key(
-                        self, process, kernel_context, &continuation, PARK_SLEEP, true, &operation_key,
-                        0);
+                        self, process, kernel_context, &continuation, PARK_SLEEP, true, &operation_key, 0);
                 },
                 none_do_nothing()
             );
@@ -2657,11 +3294,12 @@ Result(ProcessPtr) Scheduler__sleep_usec(SchedulerPtr self, ProcessPtr process, 
     return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
-Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ProcessPtr process, ProcessSignalMask mask)
+Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ThreadPtr thread, ProcessSignalMask mask)
 {
-    ProcessSignalMask previous_mask = Process__signal_mask(process);
+    ProcessPtr process = thread->owner;
+    ProcessSignalMask previous_mask = Thread__signal_mask(thread);
     match_result(
-        Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, mask),
+        Thread__set_signal_mask(thread, PROCESS_SIGNAL_MASK_SET, mask),
         success_do_nothing(),
         error(code, message)
         {
@@ -2680,24 +3318,25 @@ Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ProcessPtr proce
                 cpu,
                 sched,
                 {
-                    if (is_something(ProcessTable__find_item(&sched->processes, process)))
+                    if (is_something(ThreadTable__find_item(&sched->threads, thread)))
                     {
                         KernelContextPtr context =
-                            KernelContext__heap_new(&Some(ProcessID, process->pid), &Some(SchedulerPtr, self));
+                            KernelContext__heap_new(&Some(ThreadPtr, thread), &Some(SchedulerPtr, self));
                         match_result(
-                            CPUScheduler__park(sched, process, context, &Some(Continuation, SystemCall__Complete),
-                                               PARK_WAIT_SIGNAL, true, &None(OperationKey), previous_mask),
+                            CPUScheduler__park(sched, process, context,
+                                               &Some(Continuation, SystemCall__Complete), PARK_WAIT_SIGNAL,
+                                               true, &None(OperationKey), previous_mask),
                             success(parked)
                             {
-                                if (Process__mark_signal_suspend_ready(process))
+                                if (Thread__mark_signal_suspend_ready(thread))
                                 {
-                                    process->state = PROC_STATE_INTERRUPTED;
+                                    thread->state = PROC_STATE_INTERRUPTED;
                                 }
                                 cs_return(Success(ProcessPtr, parked));
                             },
                             error(code, message)
                             {
-                                Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, previous_mask);
+                                Thread__set_signal_mask(thread, PROCESS_SIGNAL_MASK_SET, previous_mask);
                                 cs_return(Error(ProcessPtr, message, code));
                             }
                         );
@@ -2707,7 +3346,7 @@ Result(ProcessPtr) Scheduler__signal_suspend(SchedulerPtr self, ProcessPtr proce
         }
     );
 
-    Process__set_signal_mask(process, PROCESS_SIGNAL_MASK_SET, previous_mask);
+    Thread__set_signal_mask(thread, PROCESS_SIGNAL_MASK_SET, previous_mask);
     return Error(ProcessPtr, process_not_found, SCHEDULER_PROCESS_NOT_FOUND);
 }
 
@@ -2716,10 +3355,7 @@ static Result(ProcessPtr)
                                          OptionalPtr(ReturnCode) return_code, OptionalPtr(OperationKey) operation_key)
 {
     __d_println(SCHEDULER, "scheduler unparking");
-    if (!Process__has_parked_operation(proc, reason, operation_key))
-    {
-        return Error(ProcessPtr, process_wasnt_parked, SCHEDULER_CANT_UNPARK);
-    }
+    bool found_process = false;
     for_each_hashtable(
         CPUSchedulers,
         self->schedulers,
@@ -2739,7 +3375,11 @@ static Result(ProcessPtr)
                 },
                 error(code, message)
                 {
-                    if (code != SCHEDULER_PROCESS_NOT_FOUND)
+                    if (code == SCHEDULER_CANT_UNPARK)
+                    {
+                        found_process = true;
+                    }
+                    else if (code != SCHEDULER_PROCESS_NOT_FOUND)
                     {
                         return Error(ProcessPtr, message, code);
                     }
@@ -2747,6 +3387,11 @@ static Result(ProcessPtr)
             );
         }
     );
+
+    if (found_process)
+    {
+        return Error(ProcessPtr, process_wasnt_parked, SCHEDULER_CANT_UNPARK);
+    }
 
     BString no_scheduler = BString__sprintf(&bstr("Process not found: %i\n"), proc->pid);
     return Error(ProcessPtr, no_scheduler, SCHEDULER_PROCESS_NOT_FOUND);
@@ -2891,6 +3536,7 @@ Result(SchedulerInitStatus) Scheduler__register_cpu(SchedulerPtr self, CPUID cpu
             );
         }
     );
+
     return Error(SchedulerInitStatus, unknown_error, SCHEDULER_INIT_ERROR);
 }
 
@@ -2953,6 +3599,25 @@ Optional(ProcessPtr) Scheduler__current_process(SchedulerPtr self, CPUID cpu)
     return None(ProcessPtr);
 }
 
+Optional(ThreadPtr) Scheduler__current_thread(SchedulerPtr self, CPUID cpu)
+{
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_optional(
+                CPUSchedulers__get(&self->schedulers, cpu),
+                some(scheduler)
+                {
+                    cs_return(CPUScheduler__current_thread(scheduler));
+                },
+                none_do_nothing()
+            );
+        }
+    );
+
+    return None(ThreadPtr);
+}
+
 bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu)
 {
     critical_section(
@@ -2986,28 +3651,37 @@ bool Scheduler__should_preempt_on_timer(SchedulerPtr self, CPUID cpu)
     return true;
 }
 
-Optional(ProcessPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context)
+Optional(ThreadPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, const OptionalPtr(ThreadContextPtr) context)
 {
     critical_section(
         self->scheduler_lock,
         {
             match_optional(
-                Scheduler__current_process_locked(self, cpu),
-                some(proc)
+                CPUSchedulers__get(&self->schedulers, cpu),
+                some(scheduler)
                 {
-                    __d_printf(SCHEDULER, "Scheduler__save_context %s\n", cstr(proc->name));
-                    match_result(
-                        Process__save_context(proc, context),
-                        success(code)
+                    match_optional(
+                        CPUScheduler__current_thread(scheduler),
+                        some(thread)
                         {
-                            cs_return(Some(ProcessPtr, proc));
+                            ProcessPtr proc = thread->owner;
+                            __d_printf(SCHEDULER, "Scheduler__save_context %s\n", cstr(proc->name));
+                            match_result(
+                                Thread__save_context(thread, context),
+                                success(code)
+                                {
+                                    cs_return(Some(ThreadPtr, thread));
+                                },
+                                error(code, message)
+                                {
+                                    __d_printf(SCHEDULER,
+                                               "Context save failed pid=%i name=%s code=%i message=%s\n",
+                                               proc->pid, cstr(proc->name), code, cstr(message));
+                                    cs_return(None(ThreadPtr));
+                                }
+                            );
                         },
-                        error(code, message)
-                        {
-                            __d_printf(SCHEDULER, "Context save failed pid=%i name=%s code=%i message=%s\n", proc->pid,
-                                       cstr(proc->name), code, cstr(message));
-                            cs_return(None(ProcessPtr));
-                        }
+                        none_do_nothing()
                     );
                 },
                 none_do_nothing()
@@ -3015,7 +3689,7 @@ Optional(ProcessPtr) Scheduler__save_context(SchedulerPtr self, CPUID cpu, const
         }
     );
 
-    return None(ProcessPtr);
+    return None(ThreadPtr);
 }
 
 Optional(ProcessPtr) Scheduler__idle_process(SchedulerPtr self, CPUID cpu)
@@ -3050,14 +3724,23 @@ Result(SchedulerScheduleStatus) Scheduler__schedule(SchedulerPtr self, ProcessPt
         self->scheduler_lock,
         {
             match_result(
+                Scheduler__register_live_child_locked(self, new_proc),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    cs_return(Error(SchedulerScheduleStatus, message, SCHEDULER_GENERAL_ERROR));
+                }
+            );
+            match_result(
                 ProcessTable__push(&self->admission, new_proc),
                 success(index)
                 {
-                    new_proc->state = PROC_STATE_READY;
+                    new_proc->thread.state = PROC_STATE_READY;
                     cs_return(Success(SchedulerScheduleStatus, SCHEDULER_SCHEDULE_OK));
                 },
                 error(code, message)
                 {
+                    Scheduler__unlink_live_child_locked(new_proc);
                     cs_return(Error(SchedulerScheduleStatus, message, code));
                 }
             );
@@ -3065,6 +3748,436 @@ Result(SchedulerScheduleStatus) Scheduler__schedule(SchedulerPtr self, ProcessPt
     );
 
     return Error(SchedulerScheduleStatus, unknown_error, SCHEDULER_GENERAL_ERROR);
+}
+
+static Result(ThreadID) Scheduler__publish_thread(SchedulerPtr self, ThreadPtr caller, ThreadPtr created)
+{
+    ProcessPtr process = caller->owner;
+    if (process->lifecycle.terminating || process->next_thread_id > (ThreadID)INT64_MAX ||
+        ProcessThreads__len(&process->threads) >= MAX_PROCESSES)
+    {
+        return Error(ThreadID, bstr("Process cannot create another thread"), THREAD_OPERATION_BUSY);
+    }
+
+    match_optional(
+        CPUSchedulers__get(&self->schedulers, CPU__id()),
+        some(cpu)
+        {
+            if (is_nothing(ThreadTable__find_item(&cpu->threads, caller)) ||
+                is_nothing(ProcessTable__find_item(&cpu->processes, process)))
+            {
+                return Error(ThreadID, process_not_found, THREAD_OPERATION_NOT_FOUND);
+            }
+            match_result(
+                ProcessThreads__push(&process->threads, created),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(ThreadID, message, THREAD_OPERATION_NO_MEMORY);
+                }
+            );
+            match_result(
+                ThreadTable__push(&cpu->threads, created),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    ProcessThreads__remove(&process->threads, created);
+                    return Error(ThreadID, message, THREAD_OPERATION_NO_MEMORY);
+                }
+            );
+            created->id = process->next_thread_id++;
+            created->state = PROC_STATE_READY;
+            return Success(ThreadID, created->id);
+        },
+        none_do_nothing()
+    );
+    return Error(ThreadID, process_not_found, THREAD_OPERATION_NOT_FOUND);
+}
+
+Result(ThreadID) Scheduler__create_thread(SchedulerPtr self, ThreadPtr caller, Address trampoline,
+                                          Address start_function, Anything argument, Address thread_pointer)
+{
+    if (trampoline == 0 || start_function == 0)
+    {
+        return Error(ThreadID, bstr("Invalid thread entry"), THREAD_OPERATION_INVALID);
+    }
+    ProcessPtr process = caller->owner;
+    size_t stack_size = SystemInfo__default_user_stack_size();
+    match_optional(
+        process->kernel->system_info,
+        some(system_info)
+        {
+            stack_size = SystemInfo__user_stack_size(&system_info);
+        },
+        none_do_nothing()
+    );
+    match_result(
+        Process__alloc_user_pages(process, stack_size),
+        success(base)
+        {
+            Stack stack = Stack__new_from_user_allocation(base, stack_size);
+            ThreadPtr created = v_ptr(Kernel__alloc(sizeof(Thread)), Thread);
+            *created = Thread__new(process, &stack);
+            created->owns_storage = true;
+            created->context = Some(
+                ThreadContextPtr,
+                ThreadContext__init_thread(process->kernel, &stack,
+                                           UserAddress__new(trampoline, NULL_KERNEL_ADDRESS, true, false, true, true),
+                                           start_function, argument));
+            ThreadContext__set_thread_pointer(Thread__required_context(created), thread_pointer);
+            Result(ThreadID) published;
+            critical_section(
+                self->scheduler_lock,
+                {
+                    published = Scheduler__publish_thread(self, caller, created);
+                }
+            );
+            match_result(
+                published,
+                success(id)
+                {
+                    return Success(ThreadID, id);
+                },
+                error(code, message)
+                {
+                    Thread__dispose_exit_resources(created);
+                    Kernel__free(addr(created));
+                    Process__free_user_pages(process, base.virtual_addr);
+                    return Error(ThreadID, message, code);
+                }
+            );
+        },
+        error(code, message)
+        {
+            return Error(ThreadID, message, THREAD_OPERATION_NO_MEMORY);
+        }
+    );
+    return Error(ThreadID, bstr("Thread creation failed"), THREAD_OPERATION_NO_MEMORY);
+}
+
+static bool Scheduler__thread_id_matches(ThreadPtr * candidate, void * context)
+{
+    return (*candidate)->id == *(ThreadID *)context;
+}
+
+static Result(ThreadJoinStatus)
+    Scheduler__write_join_result(ProcessPtr process, ThreadJoinResultPtr result, Anything value)
+{
+    match_optional(
+        Process__writable_user_kernel_mapping(process, addr(result), sizeof(ThreadJoinResult)),
+        some(mapping)
+        {
+            ThreadJoinResult joined = ThreadJoinResult__new(value);
+            Kernel__memcopy(addr(&joined), mapping.virtual_addr, sizeof(joined));
+            return Success(ThreadJoinStatus, THREAD_OPERATION_OK);
+        },
+        none_do_nothing()
+    );
+    return Error(ThreadJoinStatus, bstr("Invalid thread join result"), THREAD_OPERATION_INVALID);
+}
+
+static Result(ThreadJoinStatus) Scheduler__reap_thread(SchedulerPtr self, ThreadPtr thread)
+{
+    if (thread == &thread->owner->thread)
+    {
+        return Success(ThreadJoinStatus, THREAD_OPERATION_OK);
+    }
+
+    ProcessPtr process = thread->owner;
+    critical_section(
+        self->scheduler_lock,
+        {
+            for_each_hashtable(
+                CPUSchedulers,
+                self->schedulers,
+                bucket_index,
+                entry_index,
+                cpu,
+                               scheduler,
+                {
+                    match_optional(
+                        scheduler->switching_out,
+                        some(outgoing)
+                        {
+                            if (outgoing == thread)
+                            {
+                                scheduler->switching_out = None(ThreadPtr);
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                }
+            );
+        }
+    );
+    match_result(
+        Process__free_user_pages(process, thread->stack.base.virtual_addr),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ThreadJoinStatus, message, code);
+        }
+    );
+    match_result(
+        Thread__dispose_exit_resources(thread),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ThreadJoinStatus, message, code);
+        }
+    );
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_result(
+                ProcessThreads__remove(&process->threads, thread),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    cs_return(Error(ThreadJoinStatus, message, THREAD_OPERATION_NOT_FOUND));
+                }
+            );
+        }
+    );
+    match_result(
+        Kernel__free(addr(thread)),
+        success_do_nothing(),
+        error(code, message)
+        {
+            return Error(ThreadJoinStatus, message, code);
+        }
+    );
+    return Success(ThreadJoinStatus, THREAD_OPERATION_OK);
+}
+
+static Result(Anything) Scheduler__complete_thread_join(ParkedOperationPtr operation)
+{
+    match_optional(
+        operation->kernel_context->thread,
+        some(joiner)
+        {
+            ProcessPtr process = joiner->owner;
+            ThreadID target_id = unwrap_optional(operation->operation_key, 0);
+            match_find_result(
+                ProcessThreads__find(&process->threads, Scheduler__thread_id_matches, &target_id),
+                some(target)
+                {
+                    target->joiner = None(ThreadPtr);
+                    if (target->state != PROC_STATE_DEAD)
+                    {
+                        return Error(Anything, bstr("Thread join interrupted"), SYSCALL_INTERRUPTED);
+                    }
+                    match_result(
+                        Scheduler__write_join_result(process, (ThreadJoinResultPtr)operation->operation_context,
+                                                     target->exit_value),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            return Error(Anything, message, code);
+                        }
+                    );
+                    target->joined = true;
+                    match_optional(
+                        operation->kernel_context->scheduler,
+                        some(scheduler)
+                        {
+                            match_result(
+                                Scheduler__reap_thread(scheduler, target),
+                                success_do_nothing(),
+                                error(code, message)
+                                {
+                                    return Error(Anything, message, code);
+                                }
+                            );
+                        },
+                        none_do_nothing()
+                    );
+                    return Success(Anything, THREAD_OPERATION_OK);
+                },
+                none_do_nothing()
+            );
+        },
+        none_do_nothing()
+    );
+    return Error(Anything, bstr("Thread join target not found"), THREAD_OPERATION_NOT_FOUND);
+}
+
+Result(ThreadJoinStatus)
+    Scheduler__join_thread(SchedulerPtr self, ThreadPtr caller, ThreadID target_id, ThreadJoinResultPtr result)
+{
+    if (target_id == caller->id || target_id == 0)
+    {
+        return Error(ThreadJoinStatus, bstr("Invalid thread join"), THREAD_OPERATION_INVALID);
+    }
+    ProcessPtr process = caller->owner;
+    if (is_nothing(Process__writable_user_kernel_mapping(process, addr(result), sizeof(ThreadJoinResult))))
+    {
+        return Error(ThreadJoinStatus, bstr("Invalid thread join result"), THREAD_OPERATION_INVALID);
+    }
+    Optional(ThreadPtr) reap = None(ThreadPtr);
+    Result(ThreadJoinStatus) outcome = Error(ThreadJoinStatus, bstr("Thread not found"), THREAD_OPERATION_NOT_FOUND);
+    critical_section(
+        self->scheduler_lock,
+        {
+            match_find_result(
+                ProcessThreads__find(&process->threads, Scheduler__thread_id_matches, &target_id),
+                some(target)
+                {
+                    if (target->joined || is_something(target->joiner))
+                    {
+                        cs_return(Error(ThreadJoinStatus, bstr("Thread already has a joiner"), THREAD_OPERATION_BUSY));
+                    }
+                    if (target->state == PROC_STATE_DEAD)
+                    {
+                        outcome = Scheduler__write_join_result(process, result, target->exit_value);
+                        match_result(
+                            outcome,
+                            success(_)
+                            {
+                                target->joined = true;
+                                reap = Some(ThreadPtr, target);
+                            },
+                            error(code, message)
+                            {
+                                outcome = Error(ThreadJoinStatus, message, code);
+                            }
+                        );
+                    }
+                    else
+                    {
+                        KernelContextPtr context =
+                            KernelContext__heap_new(&Some(ThreadPtr, caller), &Some(SchedulerPtr, self));
+                        match_optional(
+                            CPUSchedulers__get(&self->schedulers, CPU__id()),
+                            some(cpu)
+                            {
+                                match_result(
+                                    CPUScheduler__park(
+                                        cpu, process, context, &Some(Continuation, Scheduler__complete_thread_join),
+                                        PARK_WAIT_THREAD, true, &Some(OperationKey, target_id), addr(result)),
+                                    success(_)
+                                    {
+                                        target->joiner = Some(ThreadPtr, caller);
+                                        cs_return(
+                                            Error(ThreadJoinStatus, bstr("Thread join pending"), SYSCALL_IO_BLOCK));
+                                    },
+                                    error(code, message)
+                                    {
+                                        outcome = Error(ThreadJoinStatus, message, code);
+                                    }
+                                );
+                            },
+                            none_do_nothing()
+                        );
+                        KernelContext__dispose_heap(context);
+                    }
+                },
+                none_do_nothing()
+            );
+        }
+    );
+    match_optional(
+        reap,
+        some(target)
+        {
+            match_result(
+                Scheduler__reap_thread(self, target),
+                success_do_nothing(),
+                error(code, message)
+                {
+                    return Error(ThreadJoinStatus, message, code);
+                }
+            );
+        },
+        none_do_nothing()
+    );
+    return outcome;
+}
+
+Result(ThreadJoinStatus) Scheduler__exit_thread(SchedulerPtr self, ThreadPtr caller, Anything value)
+{
+    ProcessPtr process = caller->owner;
+    bool other_live = false;
+    critical_section(
+        self->scheduler_lock,
+        {
+            for_each_ll(
+                ProcessThreads,
+                process->threads,
+                thread,
+                {
+                    match_optional(
+                        thread->joiner,
+                        some(joiner)
+                        {
+                            if (joiner == caller)
+                            {
+                                thread->joiner = None(ThreadPtr);
+                            }
+                        },
+                        none_do_nothing()
+                    );
+                    if (thread != caller && thread->state != PROC_STATE_DEAD)
+                    {
+                        other_live = true;
+                    }
+                }
+            );
+            if (other_live)
+            {
+                match_optional(
+                    CPUSchedulers__get(&self->schedulers, CPU__id()),
+                    some(cpu)
+                    {
+                        match_result(
+                            ThreadTable__remove(&cpu->threads, caller),
+                            success_do_nothing(),
+                            error(code, message)
+                            {
+                                cs_return(Error(ThreadJoinStatus, message, THREAD_OPERATION_NOT_FOUND));
+                            }
+                        );
+                        caller->exit_value = value;
+                        caller->state = PROC_STATE_DEAD;
+                        match_optional(
+                            caller->joiner,
+                            some(joiner)
+                            {
+                                if (Thread__mark_parked_operation_ready(joiner, PARK_WAIT_THREAD,
+                                                                        &Some(OperationKey, caller->id),
+                                                                        &Some(ReturnCode, THREAD_OPERATION_OK)))
+                                {
+                                    joiner->state = PROC_STATE_INTERRUPTED;
+                                }
+                            },
+                            none_do_nothing()
+                        );
+                    },
+                    none()
+                    {
+                        cs_return(Error(ThreadJoinStatus, process_not_found, THREAD_OPERATION_NOT_FOUND));
+                    }
+                );
+            }
+        }
+    );
+
+    if (!other_live)
+    {
+        match_result(
+            Scheduler__exit(self, process, 0),
+            success(_)
+            {
+                return Success(ThreadJoinStatus, THREAD_OPERATION_OK);
+            },
+            error(code, message)
+            {
+                return Error(ThreadJoinStatus, message, code);
+            }
+        );
+    }
+    Scheduler__yield_waiting(self, caller, CPU__id());
+    return Success(ThreadJoinStatus, THREAD_OPERATION_OK);
 }
 
 Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc, CPUID cpu)
@@ -3076,8 +4189,27 @@ Result(CPUID) Scheduler__schedule_on_cpu(SchedulerPtr self, ProcessPtr new_proc,
                 CPUSchedulers__get(&self->schedulers, cpu),
                 some(scheduler)
                 {
+                    match_result(
+                        Scheduler__register_live_child_locked(self, new_proc),
+                        success_do_nothing(),
+                        error(code, message)
+                        {
+                            cs_return(Error(CPUID, message, SCHEDULER_GENERAL_ERROR));
+                        }
+                    );
                     Result(CPUID) result = CPUScheduler__schedule(scheduler, new_proc);
-                    cs_return(result);
+                    match_result(
+                        result,
+                        success(scheduled_cpu)
+                        {
+                            cs_return(Success(CPUID, scheduled_cpu));
+                        },
+                        error(code, message)
+                        {
+                            Scheduler__unlink_live_child_locked(new_proc);
+                            cs_return(Error(CPUID, message, code));
+                        }
+                    );
                 },
                 none()
                 {
@@ -3106,7 +4238,7 @@ Result(SchedulerScheduleStatus) Scheduler__promote_realtime(SchedulerPtr self, P
                         cs_return(
                             Error(SchedulerScheduleStatus, bstr("Process CPU is not started"), SCHEDULER_NOT_STARTED));
                     }
-                    process->process_class = PROCESS_CLASS_REALTIME_SERVICE;
+                    process->scheduling.process_class = PROCESS_CLASS_REALTIME_SERVICE;
                     Scheduler__forget_preferred(self, process);
                     cs_return(Success(SchedulerScheduleStatus, SCHEDULER_SCHEDULE_OK));
                 },
@@ -3357,43 +4489,18 @@ static bool Scheduler__matches_child(ProcessPtr * candidate, void * context)
     return false;
 }
 
-static bool Scheduler__has_live_child_locked(SchedulerPtr self, ProcessPtr process, int64_t child_selection)
+static bool Scheduler__has_live_child_locked(ProcessPtr process, int64_t child_selection)
 {
     ChildSelection selection = ChildSelection__new(process, child_selection);
-    bool found = false;
     match_find_result(
-        ProcessTable__find(&self->admission, Scheduler__matches_child, &selection),
+        LiveChildren__find(&process->live_children, Scheduler__matches_child, &selection),
         some(child)
         {
             return true;
         },
         none_do_nothing()
     );
-
-    for_each_hashtable(
-        CPUSchedulers,
-        self->schedulers,
-        bucket_index,
-        entry_index,
-        cpu,
-        sched,
-        {
-            match_find_result(
-                ProcessTable__find(&sched->processes, Scheduler__matches_child, &selection),
-                some(child)
-                {
-                    found = true;
-                },
-                none_do_nothing()
-            );
-            if (found)
-            {
-                break;
-            }
-        }
-    );
-
-    return found;
+    return false;
 }
 
 Result(ProcessChildEvent)
@@ -3419,7 +4526,7 @@ Result(ProcessChildEvent)
                 }
             );
 
-            if (!Scheduler__has_live_child_locked(self, process, child_selection))
+            if (!Scheduler__has_live_child_locked(process, child_selection))
             {
                 cs_return(Error(ProcessChildEvent, bstr("No matching child process"), PROCESS_CHILD_EVENT_NO_CHILD));
             }
@@ -3466,7 +4573,8 @@ Result(ProcessChildEvent)
 static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr self, ProcessPtr process)
 {
     Process__wake_shared_wait(process);
-    if (Scheduler__is_parked_for(process, PARK_WAIT_SERVICE_EVENT))
+    Scheduler__wake_kernel_queue_waiters_locked(self, process);
+    if (Scheduler__is_parked_for(self, process, PARK_WAIT_SERVICE_EVENT))
     {
         __d_printf(SCHEDULER, "service enqueue unparking pid=%i\n", process->pid);
         for_each_hashtable(
@@ -3483,7 +4591,7 @@ static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr 
                     success(unparked)
                     {
                         __d_printf(SCHEDULER, "service enqueue unparked pid=%i cpu=%i state=%s\n",
-                                   process->pid, cpu, ProcessState__to_string(process->state));
+                                   process->pid, cpu, ProcessState__to_string(process->thread.state));
                         return Success(ServiceCode, SERVICE_OK);
                     },
                     error(code, message)
@@ -3496,11 +4604,6 @@ static Result(ServiceCode) Scheduler__service_mark_runnable_locked(SchedulerPtr 
                 );
             }
         );
-    }
-
-    if (process->state == PROC_STATE_WAITING && ServiceEvents__len(&process->service.events) > 0)
-    {
-        process->state = PROC_STATE_INTERRUPTED;
     }
 
     return Success(ServiceCode, SERVICE_OK);
@@ -3551,8 +4654,8 @@ Result(ServiceCode) Scheduler__register_memory_reclaimer(SchedulerPtr self, Proc
     critical_section(
         self->scheduler_lock,
         {
-            bool was_registered = process->memory_reclaimer;
-            process->memory_reclaimer = true;
+            bool was_registered = process->service_state.memory_reclaimer;
+            process->service_state.memory_reclaimer = true;
             if (!was_registered && pressure != MEM_PRESSURE_NORMAL)
             {
                 cs_return(Scheduler__enqueue_memory_pressure_locked(self, process, pressure, free_pages));
@@ -3581,7 +4684,7 @@ Result(ServiceCode) Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_
                 index,
                 process,
                 {
-                    if (process->memory_reclaimer)
+                    if (process->service_state.memory_reclaimer)
                     {
                         match_result(
                             Scheduler__enqueue_memory_pressure_locked(self, process, pressure, free_pages),
@@ -3604,7 +4707,7 @@ Result(ServiceCode) Scheduler__notify_memory_pressure(SchedulerPtr self, uint64_
 static Result(ServiceCode)
     Scheduler__service_ready_mark_runnable_locked(SchedulerPtr self, ProcessPtr process, ServiceCode result)
 {
-    if (Scheduler__is_parked_for(process, PARK_WAIT_SERVICE_READY))
+    if (Scheduler__is_parked_for(self, process, PARK_WAIT_SERVICE_READY))
     {
         for_each_hashtable(
             CPUSchedulers,
@@ -3684,7 +4787,7 @@ Result(ServiceCode)
                                                          OptionalPtr(Continuation) continuation,
                                                          bool owns_kernel_context)
 {
-    if (!ProcessClass__is_service(process->process_class))
+    if (!ProcessClass__is_service(process->scheduling.process_class))
     {
         return Error(ServiceCode, service_event_queue_empty, SERVICE_NOT_SERVICE_PROCESS);
     }
@@ -3745,18 +4848,38 @@ static Result(ServiceCode)
                                           ProcessGroupID child_process_group_id, uint64_t event_type)
 {
     Process__wake_shared_wait(process);
-    bool wait_ready = Process__mark_child_wait_ready(process, child_pid, child_process_group_id, event_type);
-    if (wait_ready)
-    {
-        process->state = PROC_STATE_INTERRUPTED;
-    }
+    bool wait_ready = false;
+    for_each_hashtable(
+        CPUSchedulers,
+        self->schedulers,
+        bucket_index,
+        entry_index,
+        cpu,
+        scheduler,
+        {
+            for_each_fa(
+                ThreadTable,
+                scheduler->threads,
+                thread_index,
+                thread,
+                {
+                    if (!wait_ready && thread->owner == process &&
+                        Thread__mark_child_wait_ready(thread, child_pid, child_process_group_id, event_type))
+                    {
+                        thread->state = PROC_STATE_INTERRUPTED;
+                        wait_ready = true;
+                    }
+                }
+            );
+        }
+    );
 
     Scheduler__trace_child_wake(process, child_pid, event_type, wait_ready);
 
     return Success(ServiceCode, SERVICE_OK);
 }
 
-Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context)
+Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ThreadContextPtr) context)
 {
     critical_section(
         self->scheduler_lock,
@@ -3778,11 +4901,19 @@ Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, const
                         },
                         none_do_nothing()
                     );
-                    scheduler->switching_out = None(ProcessPtr);
+                    scheduler->switching_out = None(ThreadPtr);
                     Scheduler__poll_queue_waiters(self);
                     Scheduler__poll_exec_load_waiters(scheduler);
                     Scheduler__refresh_preferred(self);
                     Optional(ContextSwitch) next = CPUScheduler__interrupt(scheduler, context);
+                    match_optional(
+                        next,
+                        some(selected)
+                        {
+                            scheduler->dispatching_process = Some(ProcessPtr, selected.new_thread->owner);
+                        },
+                        none_do_nothing()
+                    );
                     cs_return(next);
                 },
                 none()
@@ -3797,7 +4928,7 @@ Optional(ContextSwitch) Scheduler__interrupt(SchedulerPtr self, CPUID cpu, const
     return None(ContextSwitch);
 }
 
-void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessContextPtr) context)
+void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ThreadContextPtr) context)
 {
     Optional(ContextSwitch) context_switch = Scheduler__interrupt(self, cpu, context);
     match_optional(context_switch,
@@ -3809,7 +4940,7 @@ void Scheduler__preempt(SchedulerPtr self, CPUID cpu, const OptionalPtr(ProcessC
     );
 }
 
-void Scheduler__yield_runnable(SchedulerPtr self, ProcessPtr yielding_proc, CPUID cpu)
+void Scheduler__yield_runnable(SchedulerPtr self, ThreadPtr yielding_thread, CPUID cpu)
 {
     Optional(ContextSwitch) context_switch = None(ContextSwitch);
     critical_section(
@@ -3821,8 +4952,16 @@ void Scheduler__yield_runnable(SchedulerPtr self, ProcessPtr yielding_proc, CPUI
                 {
                     Scheduler__poll_queue_waiters(self);
                     Scheduler__refresh_preferred(self);
-                    Scheduler__forget_preferred(self, yielding_proc);
-                    context_switch = CPUScheduler__yield_runnable(scheduler, yielding_proc);
+                    Scheduler__forget_preferred(self, yielding_thread->owner);
+                    context_switch = CPUScheduler__yield_runnable(scheduler, yielding_thread);
+                    match_optional(
+                        context_switch,
+                        some(selected)
+                        {
+                            scheduler->dispatching_process = Some(ProcessPtr, selected.new_thread->owner);
+                        },
+                        none_do_nothing()
+                    );
                 },
                 none_do_nothing()
             );
@@ -3838,8 +4977,9 @@ void Scheduler__yield_runnable(SchedulerPtr self, ProcessPtr yielding_proc, CPUI
     );
 }
 
-void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID cpu)
+void Scheduler__yield_waiting(SchedulerPtr self, ThreadPtr waiting_thread, CPUID cpu)
 {
+    ProcessPtr waiting_proc = waiting_thread->owner;
     Optional(ContextSwitch) context_switch = None(ContextSwitch);
     __d_printf(SCHEDULER, "Scheduler__yield_waiting cpu=%i waiting pid=%i name=%s\n", cpu, waiting_proc->pid,
                cstr(waiting_proc->name));
@@ -3852,18 +4992,27 @@ void Scheduler__yield_waiting(SchedulerPtr self, ProcessPtr waiting_proc, CPUID 
                 {
                     Scheduler__poll_queue_waiters(self);
                     Scheduler__refresh_preferred(self);
-                    context_switch = CPUScheduler__yield_waiting(scheduler, waiting_proc);
+                    context_switch = CPUScheduler__yield_waiting(scheduler, waiting_thread);
+                    match_optional(
+                        context_switch,
+                        some(selected)
+                        {
+                            scheduler->dispatching_process = Some(ProcessPtr, selected.new_thread->owner);
+                        },
+                        none_do_nothing()
+                    );
                 },
                 none_do_nothing()
             );
         }
     );
+
     match_optional(
         context_switch,
         some(next)
         {
             __d_printf(SCHEDULER, "Scheduler__yield_waiting switch cpu=%i from pid=%i to pid=%i name=%s\n", cpu,
-                       waiting_proc->pid, next.new_proc->pid, cstr(next.new_proc->name));
+                       waiting_proc->pid, next.new_thread->owner->pid, cstr(next.new_thread->owner->name));
             ContextSwitch__switch(&next);
         },
         none()

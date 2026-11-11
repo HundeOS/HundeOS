@@ -27,7 +27,7 @@ Result(ProcessSetupStatus) EmbeddedArchive__map_process(ProcessPtr self)
             }
             KernelAddress backing = KernelAddress__new(region.virtual_start, region.physical_start, true);
             UserAddress mapping = UserAddress__new(EMBEDDED_FS_VADDR, backing, true, false, false, true);
-            PageTable__map_shared(&self->page_table, self->kernel, mapping, size);
+            PageTable__map_shared(&self->address_space.page_table, self->kernel, mapping, size);
             return Success(ProcessSetupStatus, PROCESS_SETUP);
         },
         none()

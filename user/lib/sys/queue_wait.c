@@ -93,10 +93,9 @@ static void QueueWait__arm_control(IpcEventGeneration observed, uint64_t ticks)
         {
             uint64_t now = IpcPlatform__monotonic_usec();
             QueueWaitControl__begin(control);
-            QueueWaitControl__commit(control, now,
-                                     ticks == QUEUE_WAIT_INDEFINITE_TICKS ? QUEUE_WAIT_NO_DEADLINE
-                                                                           : now + ticks * 1000ULL,
-                                     observed);
+            QueueWaitControl__commit(
+                control, now, ticks == QUEUE_WAIT_INDEFINITE_TICKS ? QUEUE_WAIT_NO_DEADLINE : now + ticks * 1000ULL,
+                observed);
         },
         none_do_nothing()
     );
@@ -208,8 +207,7 @@ void QueueArrivals__wait(QueueArrivalsPtr self, QueueEpoch observed_epoch)
     while (QueueArrivals__epoch(self) == observed_epoch)
     {
         IpcEventGeneration observed = IpcPlatform__prepare_wait(IpcDoorbell__event(IpcPlatform__local_doorbell()));
-        if (QueueArrivals__epoch(self) != observed_epoch ||
-            !QueueWait__wait(observed, QUEUE_WAIT_INDEFINITE_TICKS))
+        if (QueueArrivals__epoch(self) != observed_epoch || !QueueWait__wait(observed, QUEUE_WAIT_INDEFINITE_TICKS))
         {
             return;
         }

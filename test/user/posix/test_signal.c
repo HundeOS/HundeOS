@@ -26,6 +26,14 @@ static ProcessSignalMask test_signal_mask(int signal)
     return (ProcessSignalMask)1U << (signal - 1);
 }
 
+void test_signal_action_constructor_initializes_empty_mask_and_requested_flags(void)
+{
+    struct sigaction action = SignalAction__new(SIG_IGN, SA_RESTART);
+    TEST_ASSERT_TRUE(action.sa_handler == SIG_IGN);
+    TEST_ASSERT_EQUAL_UINT32(0, action.sa_mask);
+    TEST_ASSERT_EQUAL(SA_RESTART, action.sa_flags);
+}
+
 ProcessSignalResult kill_process(int64_t pid, ProcessSignal signal)
 {
     kill_requests++;

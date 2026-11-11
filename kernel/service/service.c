@@ -26,13 +26,13 @@ ServiceState ServiceState__new()
 
 Result(ServiceEvent) Service__pop_next_event(ProcessPtr process)
 {
-    if (!ProcessClass__is_service(process->process_class))
+    if (!ProcessClass__is_service(process->scheduling.process_class))
     {
         return Error(ServiceEvent, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
 
     match_optional(
-        ServiceEvents__pop_front(&process->service.events),
+        ServiceEvents__pop_front(&process->service_state.service.events),
         some(event)
         {
             return Success(ServiceEvent, event);
@@ -45,7 +45,7 @@ Result(ServiceEvent) Service__pop_next_event(ProcessPtr process)
 
 Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent event)
 {
-    if (!ProcessClass__is_service(process->process_class))
+    if (!ProcessClass__is_service(process->scheduling.process_class))
     {
         return Error(ServiceCode, not_service_process, SERVICE_NOT_SERVICE_PROCESS);
     }
@@ -54,14 +54,14 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
     {
         for_each_fa_ptr(
             ServiceEvents,
-            &process->service.events,
+            &process->service_state.service.events,
             index,
             queued,
             {
                 if (queued.type == SERVICE_EVENT_MEMORY_PRESSURE)
                 {
                     match_optional(
-                        ServiceEvents__ptr_at(&process->service.events, index),
+                        ServiceEvents__ptr_at(&process->service_state.service.events, index),
                         some(stored)
                         {
                             *stored = event;
@@ -75,7 +75,7 @@ Result(ServiceCode) Service__push_next_event(ProcessPtr process, ServiceEvent ev
     }
 
     match_result(
-        ServiceEvents__push(&process->service.events, event),
+        ServiceEvents__push(&process->service_state.service.events, event),
         success_do_nothing(),
         error(code, message)
         {
@@ -93,17 +93,10 @@ Result(ServiceEvent) Service__complete_wait(ParkedOperationPtr parked_operation)
         some(scheduler)
         {
             match_optional(
-                parked_operation->kernel_context->pid,
-                some(pid)
+                parked_operation->kernel_context->thread,
+                some(thread)
                 {
-                    match_optional(
-                        Scheduler__find_process_by_pid(scheduler, pid),
-                        some(process)
-                        {
-                            return Scheduler__service_take_next_event(scheduler, process);
-                        },
-                        none_do_nothing()
-                    );
+                    return Scheduler__service_take_next_event(scheduler, thread->owner);
                 },
                 none_do_nothing()
             );

@@ -15,17 +15,17 @@ OptionalDef(KernelContextPtr);
 
 struct KernelContext
 {
-    Optional(ProcessID) pid;
+    Optional(ThreadPtr) thread;
     Optional(SchedulerPtr) scheduler;
     Optional(KernelResultMapper) result_mapper;
     Optional(KernelContextPtr) next_context;
     Anything result_mapper_context;
 };
 
-KernelContext KernelContext__new(OptionalPtr(ProcessID) pid, OptionalPtr(SchedulerPtr) scheduler);
+KernelContext KernelContext__new(OptionalPtr(ThreadPtr) thread, OptionalPtr(SchedulerPtr) scheduler);
 
-KernelContextPtr KernelContext__heap_new(OptionalPtr(ProcessID) pid, OptionalPtr(SchedulerPtr) scheduler);
-KernelContextPtr KernelContext__heap_new_with_mapper(OptionalPtr(ProcessID) pid, OptionalPtr(SchedulerPtr) scheduler,
+KernelContextPtr KernelContext__heap_new(OptionalPtr(ThreadPtr) thread, OptionalPtr(SchedulerPtr) scheduler);
+KernelContextPtr KernelContext__heap_new_with_mapper(OptionalPtr(ThreadPtr) thread, OptionalPtr(SchedulerPtr) scheduler,
                                                      KernelResultMapper mapper, Anything mapper_context);
 void KernelContext__set_result_mapper(KernelContextPtr self, KernelResultMapper mapper, Anything mapper_context);
 Result(Anything) KernelContext__map_result(KernelContextPtr self, ResultPtr(Anything) result);
@@ -35,17 +35,17 @@ void KernelContext__dispose_heap(KernelContextPtr self);
 KernelContext KernelContext__from_originating_context(ConstOriginatingContextPtr originating_context);
 KernelContextPtr KernelContext__from_originating_context_heap(ConstOriginatingContextPtr originating_context);
 
-#define NEW_KERNEL_CONTEXT(sched, proc_id)                                                                             \
+#define NEW_KERNEL_CONTEXT(sched, current_thread)                                                                      \
     (KernelContext)                                                                                                    \
     {                                                                                                                  \
-        .pid = proc_id, .scheduler = Some(SchedulerPtr, sched), .result_mapper = None(KernelResultMapper),             \
+        .thread = current_thread, .scheduler = Some(SchedulerPtr, sched), .result_mapper = None(KernelResultMapper),   \
         .result_mapper_context = 0,                                                                                    \
     }
 
 #define EMPTY_KERNEL_CONTEXT                                                                                           \
     (KernelContext)                                                                                                    \
     {                                                                                                                  \
-        .pid = None(ProcessID), .scheduler = None(SchedulerPtr), .result_mapper = None(KernelResultMapper),            \
+        .thread = None(ThreadPtr), .scheduler = None(SchedulerPtr), .result_mapper = None(KernelResultMapper),         \
         .result_mapper_context = 0,                                                                                    \
     }
 

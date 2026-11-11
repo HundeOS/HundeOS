@@ -98,8 +98,8 @@
 
 
 .macro save_context
-    // Reserve full ProcessContext size (0x320)
-    sub sp, sp, #0x320
+    // Reserve full ThreadContext size (0x330)
+    sub sp, sp, #0x330
 
     // --- General-purpose registers (x0–x30) ---
     stp x0,  x1,  [sp, #16 * 0]
@@ -151,10 +151,14 @@
     mrs x3, fpsr
     str x2, [sp, #0x310]
     str x3, [sp, #0x318]
+    mrs x2, tpidr_el0
+    str x2, [sp, #0x320]
 .endm
 
 
 .macro restore_context
+    ldr x2, [sp, #0x320]
+    msr tpidr_el0, x2
     // --- Restore SIMD/FPU registers ---
     mov x11, sp
     add x12, x11, #0x110 // q[n] offset
@@ -212,10 +216,12 @@
     ldr x30,      [x11, #16 * 15]
     ldr x11,      [x11, #16 * 5 + 8]
 
-    add sp, sp, #0x320
+    add sp, sp, #0x330
 .endm
 
 .macro restore_parked_context
+    ldr x2, [x0, #0x320]
+    msr tpidr_el0, x2
     // --- Restore SIMD/FPU registers ---
     mov x11, x0
     add x12, x11, #0x110 // q[n] offset
@@ -277,7 +283,7 @@
 .macro unwind_kernel_stack
     // this is the current kernel sp set via the interrupt
     // unwind
-    add sp, sp, #0x320
+    add sp, sp, #0x330
 .endm
 
 .macro reset_kernel_stack
@@ -290,6 +296,8 @@
 .endm
 
 .macro restore_context_preserve_x0
+    ldr x2, [sp, #0x320]
+    msr tpidr_el0, x2
     // --- Restore SIMD/FPU registers ---
     mov x11, sp
     add x12, x11, #0x110 // q[n] offset
@@ -348,5 +356,5 @@
     ldr x11,      [x11, #16 * 5 + 8]
     // NOTE: x0 intentionally not restored (used for syscall return)
 
-    add sp, sp, #0x320
+    add sp, sp, #0x330
 .endm

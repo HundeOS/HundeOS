@@ -13,10 +13,11 @@ Result(KAllocCode) DoorbellBacking__release(UserAddress self);
 // Caller holds the scheduler lock so queue mappings cannot disappear mid-read.
 bool Process__shared_wait_armed(ProcessPtr self);
 bool Process__shared_wait_ready(ProcessPtr self);
+bool Thread__shared_wait_ready(ThreadPtr self);
 bool Process__doorbell_changed(ProcessPtr self, IpcEventGeneration observed);
-void Process__arm_kernel_queue_wait(ProcessPtr self, IpcEventGeneration observed);
-void Process__clear_kernel_queue_wait(ProcessPtr self);
-bool Process__kernel_queue_wait_ready(ProcessPtr self);
+void Thread__arm_kernel_queue_wait(ThreadPtr self, IpcEventGeneration observed);
+void Thread__clear_kernel_queue_wait(ThreadPtr self);
+bool Thread__kernel_queue_wait_ready(ThreadPtr self);
 Optional(QueueWaitPublication) Process__shared_wait(ProcessPtr self);
 QueueWaitCompletedUsec Process__user_wait_usec(ProcessPtr self, QueueWaitStartedAt sampled_at_usec);
 bool Process__has_pending_messages(ProcessPtr self);

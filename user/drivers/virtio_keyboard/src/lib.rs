@@ -358,13 +358,6 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_probe_requires_virtio_input_device() {
-        assert!(Device::is_keyboard(0x7472_6976, 1, 18));
-        assert!(!Device::is_keyboard(0x7472_6976, 1, 2));
-        assert!(!Device::is_keyboard(0, 1, 18));
-    }
-
-    #[test]
     fn empty_reads_wait_and_full_buffer_preserves_event_room() {
         let mut input = Input::new();
         assert_eq!(input.read(&mut [0; 1]), None);

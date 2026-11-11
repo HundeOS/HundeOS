@@ -7,6 +7,7 @@ void reset_cpu_id();
 void set_cpu_id(CPUID id);
 void reset_cpu_count();
 void set_cpu_count(uint64_t count);
+void CPUStub__set_reschedule_hook(void (*hook)(CPUID cpu));
 void reset_cpu_reschedule(void);
 CPUID CPUStub__rescheduled_cpu(void);
 uint64_t CPUStub__reschedule_count(void);

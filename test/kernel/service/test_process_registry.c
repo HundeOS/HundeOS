@@ -33,7 +33,7 @@ void test_process_record_samples_advisory_ipc_counters_from_owned_wait_mapping(v
         error_test_fail()
     );
     match_optional(
-        process->queue_wait_control,
+        process->ipc.queue_wait_control,
         some(mapping)
         {
             QueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
@@ -75,7 +75,7 @@ void test_process_record_includes_completed_userspace_wait_time_when_not_current
 {
     unwrap_result(Process__queue_wait_control(process), 0);
     match_optional(
-        process->queue_wait_control,
+        process->ipc.queue_wait_control,
         some(mapping)
         {
             QueueWaitControlPtr control = k_v_ptr(mapping, QueueWaitControl);
@@ -100,10 +100,10 @@ void test_process_registry_is_shared_read_only_non_executable_memory(void)
     ProcessPtr peer = dummy_process(21, 0, PROC_STATE_READY);
     unwrap_result(KernelProcessRegistry__map_process(&kernel->process_registry, process), SERVICE_MAP_FAILED);
     unwrap_result(KernelProcessRegistry__map_process(&kernel->process_registry, peer), SERVICE_MAP_FAILED);
-    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->page_table), PROCESS_REGISTRY_VADDR,
-                                          true, false, false, PROCESS_REGISTRY_SIZE));
-    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&peer->page_table), PROCESS_REGISTRY_VADDR, true,
-                                          false, false, PROCESS_REGISTRY_SIZE));
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&process->address_space.page_table),
+                                          PROCESS_REGISTRY_VADDR, true, false, false, PROCESS_REGISTRY_SIZE));
+    TEST_ASSERT_TRUE(check_address_mapped(ProcessPageTable__root_table(&peer->address_space.page_table),
+                                          PROCESS_REGISTRY_VADDR, true, false, false, PROCESS_REGISTRY_SIZE));
     TEST_ASSERT_FALSE(kernel->process_registry.mapping.write);
     TEST_ASSERT_FALSE(kernel->process_registry.mapping.execute);
     ProcessRecord record = ProcessRecord__new(process, 0);

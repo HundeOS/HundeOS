@@ -13,6 +13,19 @@ def read_manifest(path):
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
+@pytest.mark.parametrize("extra_arguments, expected_disks", [((), 5), (("QEMU_TEST_BLOCK_ARGS=",), 0)])
+def test_nic_fixture_can_omit_test_disks_without_changing_defaults(extra_arguments, expected_disks):
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-s", "-f", "Makefile", "-f", "-", "test-disks-probe", *extra_arguments],
+        input="test-disks-probe:\n\t@printf '%s\\n' '$(QEMU_TEST_BLOCK_ARGS)'\n",
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.count("-device virtio-blk-device") == expected_disks
+
+
 def test_only_hunde_can_implement_unsafe_rust():
     workspace = read_manifest(WORKSPACE_ROOT / "Cargo.toml")["workspace"]
     assert workspace["lints"]["rust"]["unsafe_code"] == "forbid"
@@ -64,6 +77,35 @@ def test_boot_archive_depends_on_every_packaged_rust_component(architecture):
     assert components
     for component in components:
         assert component in dependencies, component
+
+
+@pytest.mark.parametrize("architecture", ["aarch64", "riscv64"])
+@pytest.mark.parametrize("binary_variable", ["RUST_NETWORK_PROBE_BINARY", "RUST_NIC_PROBE_BINARY"])
+def test_network_probe_is_a_rootfs_dependency_not_a_boot_archive_input(architecture, binary_variable):
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-sp", "-f", "Makefile", "-f", "-", "network-packaging-probe", f"ARCH={architecture}"],
+        input=(
+            "network-packaging-probe:\n"
+            f"\t@printf '%s\\n' binary=$({binary_variable}) rootfs=$(ROOTFS_STAMP) archive=$(EMBEDDED_FS)\n"
+            "\t@printf 'input=%s\\n' $(EMBEDDED_FS_INPUTS)\n"
+        ),
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    binary = next(line.removeprefix("binary=") for line in lines if line.startswith("binary="))
+    rootfs = next(line.removeprefix("rootfs=") for line in lines if line.startswith("rootfs="))
+    archive = next(line.removeprefix("archive=") for line in lines if line.startswith("archive="))
+    rootfs_dependencies = next(line.split(":", 1)[1].split() for line in lines if line.startswith(f"{rootfs}:"))
+    archive_dependencies = next(line.split(":", 1)[1].split() for line in lines if line.startswith(f"{archive}:"))
+    assert binary in rootfs_dependencies
+    assert binary not in archive_dependencies
+    inputs = [line.removeprefix("input=") for line in lines if line.startswith("input=")]
+    assert inputs
+    assert not any(entry == binary or entry.endswith(f"={binary}") for entry in inputs)
 
 
 @pytest.mark.parametrize("architecture", ["aarch64", "riscv64"])

@@ -1,0 +1,18 @@
+[package]
+name = "hunde-virtio-net"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "virtio-net-component"
+path = "src/entry.rs"
+required-features = ["component"]
+
+[features]
+component = []
+
+[dependencies]
+hunde = { path = "../../lib/hunde" }
+
+[lints]
+workspace = true

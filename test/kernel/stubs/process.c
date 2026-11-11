@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include "../../../kernel/arch/process.h"
 #include "../../../kernel/process.h"
-#include "process_context_layout.h"
+#include "thread_context_layout.h"
 #include "process.h"
 #include "../../../kernel/kernel_core.h"
 #include "../../../kernel/arch/mmu.h"
@@ -49,24 +49,26 @@ void clear_deferred_syscall_result()
     deferred_syscall_res = Error(Anything, bstring("no syscall result"), -1);
 }
 
-void Process__switch_context(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
+void Process__switch_context(ProcessPtr self, ThreadContextPtr context, KernelAddress page_table)
 {
     switched_with_scheduler_lock = scheduler_lock_held(self);
     current_process = self;
     MMU__install_low_mem_table(page_table);
+    Process__address_space_switched(self);
 }
 
-void Process__switch_address_space(ProcessPtr self, ProcessContextPtr context, KernelAddress page_table)
+void Process__switch_address_space(ProcessPtr self, ThreadContextPtr context, KernelAddress page_table)
 {
     active_process = self;
     MMU__install_low_mem_table(page_table);
+    Process__address_space_switched(self);
 }
 
 void Process__set_startup_stdio(ProcessPtr self, int64_t input, int64_t output, int64_t error)
 {
     initial_stdio = (TestStartupStdio){.pid = self->pid, .input = input, .output = output, .error = error};
     match_optional(
-        self->context,
+        self->thread.context,
         some(context)
         {
             context->x[4] = input;
@@ -96,7 +98,7 @@ ProcessPtr active_address_space_process()
 
 void Process__set_syscall_result(ProcessPtr self, SystemCallResult result)
 {
-    match_optional(self->context,
+    match_optional(self->thread.context,
         some(context)
         {
             context->x[0] = result;
